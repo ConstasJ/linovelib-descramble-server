@@ -9,14 +9,19 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
+  "type": "commonjs",
   "devDependencies": {
+    "@types/babel__traverse": "^7.28.0",
     "@types/node": "^25.0.8",
     "domhandler": "^5.0.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "cheerio": "^1.1.2"
+    "@babel/parser": "^7.28.6",
+    "@babel/traverse": "^7.28.6",
+    "@babel/types": "^7.28.6",
+    "cheerio": "^1.1.2",
+    "webcrack": "2.16.0-beta.1"
   }
 }

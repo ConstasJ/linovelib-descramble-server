@@ -140,5 +140,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-input.html
-output.html
+*.html
+*.js
+*.json
