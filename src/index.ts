@@ -1,13 +1,11 @@
 import express from "express";
 import morgan from "morgan";
-import nocache from "nocache";
 import { getCoefficientsFromPage } from "./extractor";
 
 async function main() {
     const app = express();
     app.use(express.json());
     app.use(morgan("dev"));
-    app.use(nocache());
 
     const router = express.Router();
 
