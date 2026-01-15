@@ -7,7 +7,7 @@ RUN mkdir -p /app
 WORKDIR /app
 COPY package.json /app
 
-RUN npm config set registry ${NPM_REGISTRY} && npm i -g pnpm && pnpm install
+RUN npm config set registry ${NPM_REGISTRY} && npm i -g pnpm && pnpm install --dangerously-allow-all-builds
 
 COPY . /app/
 RUN pnpm build
