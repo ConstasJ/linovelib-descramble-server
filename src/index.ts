@@ -91,6 +91,9 @@ async function main() {
     }
 
     process.on("SIGINT", onExit);
+    process.on("SIGTERM", onExit);
+    process.on("SIGUSR1", onExit);
+    process.on("SIGUSR2", onExit);
 }
 
 main();
