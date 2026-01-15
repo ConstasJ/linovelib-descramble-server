@@ -5,7 +5,6 @@ import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import { writeFile } from "fs/promises";
 import { type Element, type AnyNode } from "domhandler"; 
-import { getCachedValue, setCachedValue } from "./cache";
 
 export interface Coefficients {
     seedMultiplier: number;
@@ -20,11 +19,6 @@ function getObfuscatedPart(fullCode: string): string {
     if (!match || match.index == null)
         throw new Error("Obfuscated part not found");
     return fullCode.slice(match.index);
-}
-
-function isCoefficientsNeedUpdate(version: string) {
-    const cachedVersion = getCachedValue<string>("chapterLogVersion");
-    return cachedVersion !== version;
 }
 
 async function extractCoefficients(scriptUrl: string) {
@@ -122,110 +116,5 @@ function extractChapterLogScriptUrl(html: string): string {
 
 export async function getCoefficientsFromPage(html: string) {
     const scriptUrl = extractChapterLogScriptUrl(html);
-    const version = scriptUrl.match(/chapterlog\.js\?(v.*)/)?.[1] || "";
-    if (isCoefficientsNeedUpdate(version)) {
-        const coefficients = await extractCoefficients(scriptUrl);
-        setCachedValue("chapterLogVersion", version);
-        setCachedValue("coefficients", coefficients);
-        return coefficients;
-    } else {
-        const cachedCoefficients = getCachedValue<Coefficients>("coefficients");
-        if (cachedCoefficients) {
-            return cachedCoefficients;
-        }
-        throw new Error("Cached coefficients not found");
-    }
-}
-
-export async function decrypt(html: string) {
-    const $ = cheerio.load(html);
-    const chapterId = extractChapterId(html);
-    const coefficients = await getCoefficientsFromPage(html);
-    const container = $("#acontent");
-    if (!container.length) return "";
-
-    container.find("p").each((_, el) => {
-        const $el = $(el);
-        const innerHtml = $el.html();
-        if (innerHtml) {
-            const cleanedHtml = innerHtml.replace(/^\s+|(?<=>)\s+/g, "");
-            $el.html(cleanedHtml);
-        }
-    });
-
-    const allChildren = container
-        .contents()
-        .toArray()
-        .filter((node) => !(node.type === "tag" && node.tagName === "div"));
-
-    const sortableEntries: { element: Element; originalPos: number }[] = [];
-
-    allChildren.forEach((node, index) => {
-        if (node.type === "tag" && node.tagName === "p") {
-            const text = $(node).text().trim();
-            if (text.length > 0) {
-                sortableEntries.push({ element: node, originalPos: index });
-            }
-        }
-    });
-
-    const pCount = sortableEntries.length;
-    if (pCount <= 20) {
-        return container.html() || "";
-    }
-
-    const seed = parseInt(chapterId, 10) * coefficients.seedMultiplier + coefficients.seedOffset;
-
-    const dynamicIndices = Array.from(
-        { length: pCount - 20 },
-        (_, i) => i + 20
-    );
-    const shuffledIndices = shuffle(dynamicIndices, seed, coefficients);
-
-    const fullMapping = Array.from({ length: 20 }, (_, i) => i).concat(
-        shuffledIndices
-    );
-
-    const restoredChildren: (AnyNode | null)[] = [...allChildren];
-
-    sortableEntries.forEach((entry, i) => {
-        const targetLogicalPos = fullMapping[i] ?? 0;
-        const actualSlot = sortableEntries[targetLogicalPos]?.originalPos ?? 0;
-        restoredChildren[actualSlot] = entry.element;
-    });
-
-    const newContainer = $("<div></div>");
-    restoredChildren.forEach((node) => {
-        if (node && node.type === "tag") {
-            newContainer.append($(node));
-            newContainer.append("\n");
-        }
-    });
-
-    return newContainer.html() || "";
-}
-
-function shuffle(array: number[], seed: number, coefficients: Coefficients): number[] {
-    let currentSeed = seed;
-    const result = [...array];
-    const len = result.length;
-
-    for (let i = len - 1; i > 0; i--) {
-        currentSeed = (currentSeed * coefficients.lcgMultiplier + coefficients.lcgIncrement) % coefficients.lcgModulus;
-        const j = Math.floor((currentSeed / 233280) * (i + 1));
-
-        // 交换
-        const temp = result[i] ?? 0;
-        result[i] = result[j] ?? 0;
-        result[j] = temp;
-    }
-    return result;
-}
-
-function extractChapterId(html: string): string {
-    const match = html.match(/chapterid\s*:\s*'(\d+)'/);
-    if (match && match[1]) {
-        return match[1];
-    }
-    return "";
+    return await extractCoefficients(scriptUrl);
 }
