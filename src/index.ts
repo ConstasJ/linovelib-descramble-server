@@ -1,5 +1,6 @@
 import express from "express";
 import morgan from "morgan";
+import nocache from "nocache";
 import { decrypt, getCoefficientsFromPage } from "./decryptor";
 import { getCachedValue, setCachedValue, loadCache, persistCache } from "./cache";
 import { existsSync } from "node:fs";
@@ -12,6 +13,7 @@ async function main() {
     const app = express();
     app.use(express.json());
     app.use(morgan("dev"));
+    app.use(nocache());
 
     const router = express.Router();
 
