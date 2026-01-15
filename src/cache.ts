@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, lstat, mkdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 
 const globalCache: Map<string, any> = new Map();
 
@@ -21,7 +22,15 @@ export async function persistCache(): Promise<void> {
     for (const [key, value] of globalCache.entries()) {
         obj[key] = value;
     }
-    await writeFile("cache.json", JSON.stringify(obj), "utf-8").catch((err) => {
+    if (!existsSync("data")) await mkdir("data")
+    else {
+        const stats = await lstat("data");
+        if (!stats.isDirectory()) {
+            await rm("data");
+            await mkdir("data");
+        }
+    }
+    await writeFile("data/cache.json", JSON.stringify(obj), "utf-8").catch((err) => {
         console.error("Error persisting cache:", err);
     });
 }
