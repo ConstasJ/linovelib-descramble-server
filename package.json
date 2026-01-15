@@ -12,6 +12,8 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/babel__traverse": "^7.28.0",
+    "@types/express": "^5.0.6",
+    "@types/morgan": "^1.9.10",
     "@types/node": "^25.0.8",
     "domhandler": "^5.0.3",
     "ts-node": "^10.9.2",
@@ -22,6 +24,8 @@
     "@babel/traverse": "^7.28.6",
     "@babel/types": "^7.28.6",
     "cheerio": "^1.1.2",
+    "express": "^5.2.1",
+    "morgan": "^1.10.1",
     "webcrack": "2.16.0-beta.1"
   }
 }

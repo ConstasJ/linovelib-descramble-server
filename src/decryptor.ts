@@ -5,6 +5,7 @@ import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import { writeFile } from "fs/promises";
 import { type Element, type AnyNode } from "domhandler"; 
+import { getCachedValue, setCachedValue } from "./cache";
 
 export interface Coefficients {
     seedMultiplier: number;
@@ -19,6 +20,11 @@ function getObfuscatedPart(fullCode: string): string {
     if (!match || match.index == null)
         throw new Error("Obfuscated part not found");
     return fullCode.slice(match.index);
+}
+
+function isCoefficientsNeedUpdate(version: string) {
+    const cachedVersion = getCachedValue<string>("chapterLogVersion");
+    return cachedVersion !== version;
 }
 
 async function extractCoefficients(scriptUrl: string) {
@@ -100,9 +106,8 @@ async function extractCoefficients(scriptUrl: string) {
     throw new Error("Failed to extract coefficients");
 }
 
-export async function decrypt(html: string) {
+function extractChapterLogScriptUrl(html: string): string {
     const $ = cheerio.load(html);
-    const chapterId = extractChapterId(html);
     const chapterLogScriptUrl =
         $(
             $("script")
@@ -112,7 +117,30 @@ export async function decrypt(html: string) {
                     return /chapterlog\.js/.test(scriptContent);
                 })
         ).attr("src") || "";
-    const coefficients = await extractCoefficients(chapterLogScriptUrl);
+    return chapterLogScriptUrl;
+}
+
+export async function getCoefficientsFromPage(html: string) {
+    const scriptUrl = extractChapterLogScriptUrl(html);
+    const version = scriptUrl.match(/chapterlog\.js\?(v.*)/)?.[1] || "";
+    if (isCoefficientsNeedUpdate(version)) {
+        const coefficients = await extractCoefficients(scriptUrl);
+        setCachedValue("chapterLogVersion", version);
+        setCachedValue("coefficients", coefficients);
+        return coefficients;
+    } else {
+        const cachedCoefficients = getCachedValue<Coefficients>("coefficients");
+        if (cachedCoefficients) {
+            return cachedCoefficients;
+        }
+        throw new Error("Cached coefficients not found");
+    }
+}
+
+export async function decrypt(html: string) {
+    const $ = cheerio.load(html);
+    const chapterId = extractChapterId(html);
+    const coefficients = await getCoefficientsFromPage(html);
     const container = $("#acontent");
     if (!container.length) return "";
 
