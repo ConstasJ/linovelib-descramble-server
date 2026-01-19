@@ -33,8 +33,8 @@ async function main() {
         }
     });
 
-    apiRouter.post("/chapter-page", async (req, res) => {
-        const { path } = req.body;
+    apiRouter.get("/chapter-page", async (req, res) => {
+        const path = (req.query.path as string) || "";
         if (!path) {
             return res.status(400).json({ error: "Path is required" });
         }
@@ -49,8 +49,8 @@ async function main() {
         }
     });
 
-    apiRouter.post("/chapter", async (req, res) => {
-        const { path } = req.body;
+    apiRouter.get("/chapter", async (req, res) => {
+        const path = (req.query.path as string) || "";
         if (!path) {
             return res.status(400).json({ error: "Path is required" });
         }
@@ -84,8 +84,8 @@ async function main() {
         }
     });
 
-    apiRouter.post("/novel", async (req, res) => {
-        const { path } = req.body;
+    apiRouter.get("/novel", async (req, res) => {
+        const path = (req.query.path as string) || "";
         if (!path) {
             return res.status(400).json({ error: "Path is required" });
         }
@@ -171,8 +171,8 @@ async function main() {
         }
     });
 
-    apiRouter.post("/search", async (req, res) => {
-        const { keyword } = req.body;
+    apiRouter.get("/search", async (req, res) => {
+        const keyword = (req.query.keyword as string) || "";
         if (!keyword) {
             return res.status(400).json({ error: "Keyword is required" });
         }
@@ -185,11 +185,12 @@ async function main() {
             const browser = await getPuppeteerBrowser();
             const page =
                 (await browser.pages())[0] || (await browser.newPage());
-            await page.goto(homeUrl, { waitUntil: "domcontentloaded" });
+            await page.goto(homeUrl, { waitUntil: "networkidle2" });
             await page.type("input[name='searchkey']", keyword);
             await new Promise((r) => setTimeout(r, 700));
-            (await page.keyboard.press("Enter"),
-                await page.waitForSelector("div.head-fixed"));
+            await page.keyboard.press("Enter");
+            await new Promise((r) => setTimeout(r, 1000));
+            await page.waitForSelector("div.head-fixed");
             const searchResultsFPHtml = await page.content();
             const $1 = load(searchResultsFPHtml);
             if ($1("div.book-html-box").length > 0) {
@@ -223,7 +224,7 @@ async function main() {
                         await Promise.all([
                             page.click("a.next"),
                             page.waitForNavigation({
-                                waitUntil: "domcontentloaded",
+                                waitUntil: "networkidle2",
                             }),
                         ]);
                     }
@@ -240,6 +241,9 @@ async function main() {
                     );
                     if ($3("a.next").length === 0) break;
                 }
+            }
+            if (results.length === 0) {
+                throw new Error("Parser Error!");
             }
             addToNovelsCache(keyword, results);
             res.json({ results });
