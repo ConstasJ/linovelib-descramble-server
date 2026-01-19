@@ -5,6 +5,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "address": "localhost",
+            "localRoot": "${workspaceFolder}",
+            "remoteRoot": "${workspaceFolder}",
+            "name": "附加到Node",
+            "port": 9229,
+            "request": "attach",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "type": "node"
+        },
+        
+        {
             "name": "开发启动",
             "request": "launch",
             "runtimeArgs": [
@@ -30,6 +43,6 @@
             "type": "node",
             "preLaunchTask": "npm: build",
             "console": "integratedTerminal"
-        }
+        },
     ]
 }
