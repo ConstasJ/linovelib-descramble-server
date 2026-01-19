@@ -106,7 +106,15 @@ async function main() {
             const $ = load(html);
             const name = $("h1.book-name").text().trim();
             const cover = $("div.book-img img").attr("src") || "";
-            const summary = $("div.book-dec p:first").text().trim();
+            const summary = (() => {
+                const $container = $('.book-dec.Jbook-dec').clone();
+                $container.find('.notice').remove();
+                const paragraphs: string[] = [];
+                $container.find('p').each((_, el) => {
+                    paragraphs.push($(el).text().trim());
+                });
+                return paragraphs.join('\n');
+            })();
             const author = $("div.au-name a:first").text().trim();
             const status = $("div.book-label a.state").text().includes("完结")
                 ? "Completed"
