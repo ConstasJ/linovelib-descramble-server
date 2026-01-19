@@ -21,7 +21,9 @@ async function main() {
     await loadCache();
     const app = express();
     app.use(express.json());
-    app.use(morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"));
+    app.use(
+        morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"),
+    );
 
     const apiRouter = express.Router();
 
@@ -107,13 +109,13 @@ async function main() {
             const name = $("h1.book-name").text().trim();
             const cover = $("div.book-img img").attr("src") || "";
             const summary = (() => {
-                const $container = $('.book-dec.Jbook-dec').clone();
-                $container.find('.notice').remove();
+                const $container = $(".book-dec.Jbook-dec").clone();
+                $container.find(".notice").remove();
                 const paragraphs: string[] = [];
-                $container.find('p').each((_, el) => {
+                $container.find("p").each((_, el) => {
                     paragraphs.push($(el).text().trim());
                 });
-                return paragraphs.join('\n');
+                return paragraphs.join("\n");
             })();
             const author = $("div.au-name a:first").text().trim();
             const status = $("div.book-label a.state").text().includes("完结")
@@ -296,24 +298,26 @@ async function main() {
 
     let isShuttingDown = false;
     async function onExit(signal: string) {
-        if (isShuttingDown) {
-            console.log(
-                `Received ${signal}, but shutdown is already in progress ...`,
-            );
-            return;
-        }
+        if (isShuttingDown) return;
         isShuttingDown = true;
-
+        const keepAlive = setInterval(() => {}, 1000);
         console.log(`Received ${signal}, shutting down gracefully ...`);
-        const forceExitTimeout = setTimeout(() => {
-            console.error("Shutting down timeout, forcing exit.");
-            process.exit(1);
-        }, 15000);
-        forceExitTimeout.unref();
+        if (process.env.NODE_ENV !== "development") {
+            const forceExitTimeout = setTimeout(() => {
+                console.error("Shutting down timeout, forcing exit.");
+                process.exit(1);
+            }, 15000);
+            forceExitTimeout.unref();
+        }
         try {
-            await promisify(server.close.bind(server))();
-            await saveCache();
+            console.log("Saving cache...");
+            saveCache();
+            console.log("Closing server...");
+            if (server && server.listening) {
+                await promisify(server.close.bind(server))();
+            }
             console.log("Cleanup completed successfully.");
+            clearInterval(keepAlive);
             process.exit(0);
         } catch (e) {
             console.error("Error during cleanup:", e);
