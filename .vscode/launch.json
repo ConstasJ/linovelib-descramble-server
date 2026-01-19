@@ -15,7 +15,18 @@
                 "<node_internals>/**"
             ],
             "type": "node"
+        },
+        {
+            "name": "生产启动",
+            "request": "launch",
+            "runtimeArgs": [
+                "start"
+            ],
+            "runtimeExecutable": "pnpm",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "type": "node"
         }
-
     ]
 }

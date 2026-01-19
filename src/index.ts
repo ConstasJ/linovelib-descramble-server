@@ -12,6 +12,7 @@ import {
 } from "./utils";
 import { CheerioAPI, load } from "cheerio";
 import puppeteer from "puppeteer";
+import { addToNovelsCache, searchNovelsInCache } from "./cache";
 
 async function main() {
     const app = express();
@@ -175,6 +176,10 @@ async function main() {
         if (!keyword) {
             return res.status(400).json({ error: "Keyword is required" });
         }
+        const cacheResults = searchNovelsInCache(keyword);
+        if (cacheResults.length > 0) {
+            return res.json({ results: cacheResults });
+        }
         try {
             const homeUrl = `https://www.linovelib.com`;
             const browser = await getPuppeteerBrowser();
@@ -195,6 +200,7 @@ async function main() {
                         cover: $1("div.book-img img").attr("src") || "",
                     }
                 ]
+                addToNovelsCache(keyword, results);
                 return res.json({ results });
             }
             const pages =
@@ -235,6 +241,7 @@ async function main() {
                     if ($3("a.next").length === 0) break;
                 }
             }
+            addToNovelsCache(keyword, results);
             res.json({ results });
         } catch (e) {
             console.error("Error performing search:", e);
