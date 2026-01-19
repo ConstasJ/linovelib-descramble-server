@@ -20,6 +20,8 @@ import { promisify } from "node:util";
 async function main() {
     await loadCache();
     const app = express();
+
+    app.set("trust proxy", true);
     app.use(express.json());
     app.use(
         morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"),
