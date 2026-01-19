@@ -1,6 +1,6 @@
 import { NovelItem } from "./types";
-import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, stat, rm } from "node:fs/promises";
+import { existsSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 const novelsCache: Array<NovelItem> = [];
 
@@ -35,25 +35,25 @@ export function searchNovelsInCache(query: string): NovelItem[] {
 
 const dataDir = process.env.DATA_DIR || "./data";
 
-async function createDataDirIfNotExists(): Promise<void> {
+function createDataDirIfNotExists() {
     if (!existsSync(dataDir)) {
-        await mkdir(dataDir, { recursive: true });
+        mkdirSync(dataDir, { recursive: true });
     }
-    if (existsSync(dataDir) && !(await stat(dataDir)).isDirectory()) {
-        await rm(dataDir);
-        await mkdir(dataDir, { recursive: true });
+    if (existsSync(dataDir) && !(statSync(dataDir)).isDirectory()) {
+        rmSync(dataDir);
+        mkdirSync(dataDir, { recursive: true });
     }
 }
 
-export async function saveCache(): Promise<void> {
-    await createDataDirIfNotExists();
+export function saveCache() {
+    createDataDirIfNotExists();
     const cacheFilePath = `${dataDir}/novelsCache.json`;
     const cacheData = {
         lastUpdate: Date.now(),
-        novelsCache,
-        keywordsToNovelsMap: Array.from(keywordsToNovelsMap.entries()),
+        novels: novelsCache,
+        keywordsToNovelsMap,
     };
-    await writeFile(cacheFilePath, JSON.stringify(cacheData), "utf-8");
+    writeFileSync(cacheFilePath, JSON.stringify(cacheData), "utf-8");
 }
 
 export async function loadCache(): Promise<void> {
@@ -61,9 +61,9 @@ export async function loadCache(): Promise<void> {
     if (existsSync(novelCacheFilePath)) {
         const fileData = await readFile(novelCacheFilePath, "utf-8");
         const cacheData = JSON.parse(fileData);
-        novelsCache.push(...cacheData.novelsCache);
-        for (const [key, value] of cacheData.keywordsToNovelsMap) {
-            keywordsToNovelsMap.set(key, value);
+        novelsCache.push(...cacheData.novels);
+        for (const [key, value] of Object.entries(cacheData.keywordsToNovelsMap)) {
+            keywordsToNovelsMap.set(key, value as KTNMValue);
         }
     }
 }
