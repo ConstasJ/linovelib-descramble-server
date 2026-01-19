@@ -136,8 +136,10 @@ async function main() {
                 releaseTime: string | null;
             }[] = [];
             const volumes = catalogCheerio("#volume-list div.volume").toArray();
+            const novelId = path.split("/")[2];
             let lastChapNotIdentified = false;
             let lastChapterName = "";
+            let chapterId = 0;
             for (const vol of volumes) {
                 const volumeEl = catalogCheerio(vol);
                 const volumeName = volumeEl
@@ -153,12 +155,23 @@ async function main() {
                     const chapterName = transformChapterName(
                         chapterEl.text().trim(),
                     );
-                    const chapterPath = chapterEl.attr("href") || "";
+                    const idPattern = /(\d+)\.html/;
+                    const extractedChapterId = chapterEl
+                        .attr("href")
+                        ?.match(idPattern)?.[1];
+                    chapterId = extractedChapterId
+                        ? parseInt(extractedChapterId)
+                        : chapterId + 1;
+                    let chapterPath = chapterEl.attr("href") || "";
 
                     if (chapterPath.includes("javascript:cid(0)")) {
-                        lastChapNotIdentified = true;
-                        lastChapterName = chapterName;
-                        continue;
+                        if (chapterName.includes("插图")) {
+                            lastChapNotIdentified = true;
+                            lastChapterName = chapterName;
+                            continue;
+                        } else {
+                            chapterPath = `/novel/${novelId}/${chapterId}.html`;
+                        }
                     }
 
                     if (lastChapNotIdentified) {
@@ -290,9 +303,7 @@ async function main() {
             console.error("Server failed to start:", err);
         } else {
             console.log(
-                `Server is running on http://localhost:${
-                    process.env.PORT || 5301
-                }`,
+                `Server is running on http://localhost:${process.env.PORT || 5301}`,
             );
         }
     });
