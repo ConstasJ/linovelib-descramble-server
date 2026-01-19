@@ -14,7 +14,8 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "type": "node"
+            "type": "node",
+            "console": "integratedTerminal"
         },
         {
             "name": "生产启动",
@@ -27,7 +28,8 @@
                 "<node_internals>/**"
             ],
             "type": "node",
-            "preLaunchTask": "npm: build"
+            "preLaunchTask": "npm: build",
+            "console": "integratedTerminal"
         }
     ]
 }
