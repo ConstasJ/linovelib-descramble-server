@@ -5,18 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "node",
+            "name": "开发启动",
             "request": "launch",
-            "name": "启动程序",
+            "runtimeArgs": [
+                "start:dev"
+            ],
+            "runtimeExecutable": "pnpm",
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}\\dist\\index.js",
-            "preLaunchTask": "npm: build",
-            "outFiles": [
-                "${workspaceFolder}/**/*.js"
-            ]
-        },
+            "type": "node"
+        }
 
     ]
 }

@@ -116,5 +116,5 @@ function extractChapterLogScriptUrl(html: string): string {
 
 export async function getCoefficientsFromPage(html: string) {
     const scriptUrl = extractChapterLogScriptUrl(html);
-    return await extractCoefficients(scriptUrl);
+    return await extractCoefficients(scriptUrl.startsWith("http") ? scriptUrl : `https://www.linovelib.com${scriptUrl}`);
 }
