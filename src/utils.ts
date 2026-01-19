@@ -175,50 +175,54 @@ export async function fetchWithFlareSolverr(
     mode: FetchType = FetchType.GET,
     body?: string,
 ): Promise<string> {
-    const flareSolverrUrl =
-        process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
-    if (!flareSolverrSessionCreated) {
-        await createflareSolverrSession();
+    try {
+        const flareSolverrUrl =
+            process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
+        if (!flareSolverrSessionCreated) {
+            await createflareSolverrSession();
+        }
+        let res: Response | null = null;
+        switch (mode) {
+            case FetchType.GET:
+                res = await fetch(flareSolverrUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        cmd: "request.get",
+                        url,
+                        session: "LDS-Session",
+                        maxTimeout: 60000,
+                    }),
+                });
+                break;
+            case FetchType.POST:
+                res = await fetch(flareSolverrUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        cmd: "request.post",
+                        url,
+                        session: "LDS-Session",
+                        maxTimeout: 60000,
+                        postData: body,
+                    }),
+                });
+                break;
+        }
+        if (!res.ok) {
+            throw new Error(
+                `Failed to fetch via Cloudflare Solverr: ${res.status} ${res.statusText}`,
+            );
+        }
+        const data = await res.json();
+        return data.solution.response;
+    } catch (error) {
+        throw new Error(`Error in fetchWithFlareSolverr: ${error}`);
     }
-    let res: Response | null = null;
-    switch (mode) {
-        case FetchType.GET:
-            res = await fetch(flareSolverrUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    cmd: "request.get",
-                    url,
-                    session: "LDS-Session",
-                    maxTimeout: 60000,
-                }),
-            });
-            break;
-        case FetchType.POST:
-            res = await fetch(flareSolverrUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    cmd: "request.post",
-                    url,
-                    session: "LDS-Session",
-                    maxTimeout: 60000,
-                    postData: body,
-                }),
-            });
-            break;
-    }
-    if (!res.ok) {
-        throw new Error(
-            `Failed to fetch via Cloudflare Solverr: ${res.status} ${res.statusText}`,
-        );
-    }
-    const data = await res.json();
-    return data.solution.response;
 }
 
 let puppeteerBrowser: Browser | null = null;
