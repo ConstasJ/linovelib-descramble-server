@@ -51,7 +51,7 @@ export function saveCache() {
     const cacheData = {
         lastUpdate: Date.now(),
         novels: novelsCache,
-        keywordsToNovelsMap,
+        keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
     };
     writeFileSync(cacheFilePath, JSON.stringify(cacheData), "utf-8");
 }
