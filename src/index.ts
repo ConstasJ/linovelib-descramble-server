@@ -9,9 +9,16 @@ import {
     transformContent,
 } from "./utils";
 import { load } from "cheerio";
-import { addToNovelsCache, searchNovelsInCache } from "./cache";
+import {
+    addToNovelsCache,
+    loadCache,
+    saveCache,
+    searchNovelsInCache,
+} from "./cache";
+import { promisify } from "node:util";
 
 async function main() {
+    await loadCache();
     const app = express();
     app.use(express.json());
     app.use(morgan("dev"));
@@ -75,7 +82,13 @@ async function main() {
                         .attr("href")
                         ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
-            res.json({ content: "<h2>" + chapterName + "</h2>\n" + transformContent(content) });
+            res.json({
+                content:
+                    "<h2>" +
+                    chapterName +
+                    "</h2>\n" +
+                    transformContent(content),
+            });
         } catch (e) {
             console.error("Error fetching chapter:", e);
             res.status(500).json({ error: "Failed to fetch chapter" });
@@ -106,7 +119,11 @@ async function main() {
             const catalogUrl = `https://www.linovelib.com${$("a.read-btn").attr("href")}`;
             let catalogHtml = await fetchHtml(catalogUrl);
             const catalogCheerio = load(catalogHtml);
-            const chapters: { name: string; path: string, releaseTime: string | null }[] = [];
+            const chapters: {
+                name: string;
+                path: string;
+                releaseTime: string | null;
+            }[] = [];
             const volumes = catalogCheerio("#volume-list div.volume").toArray();
             let lastChapNotIdentified = false;
             let lastChapterName = "";
@@ -195,13 +212,14 @@ async function main() {
             const searchResultsFPHtml = await page.content();
             const $1 = load(searchResultsFPHtml);
             if ($1("div.book-html-box").length > 0) {
-                const results: { name: string; path: string; cover: string }[] = [
-                    {
-                        name: $1("h1.book-name").text().trim(),
-                        path: page.url().replace(homeUrl, ""),
-                        cover: $1("div.book-img img").attr("src") || "",
-                    }
-                ]
+                const results: { name: string; path: string; cover: string }[] =
+                    [
+                        {
+                            name: $1("h1.book-name").text().trim(),
+                            path: page.url().replace(homeUrl, ""),
+                            cover: $1("div.book-img img").attr("src") || "",
+                        },
+                    ];
                 addToNovelsCache(keyword, results);
                 return res.json({ results });
             }
@@ -256,7 +274,7 @@ async function main() {
 
     app.use("/api", apiRouter);
 
-    app.listen(process.env.PORT || 5301, (err?: any) => {
+    const server = app.listen(process.env.PORT || 5301, (err?: any) => {
         if (err) {
             console.error("Server failed to start:", err);
         } else {
@@ -268,15 +286,45 @@ async function main() {
         }
     });
 
-    async function onExit() {
-        console.log("Shutting down server...");
-        process.exit();
+    let isShuttingDown = false;
+    async function onExit(signal: string) {
+        if (isShuttingDown) {
+            console.log(
+                `Received ${signal}, but shutdown is already in progress ...`,
+            );
+            return;
+        }
+        isShuttingDown = true;
+
+        console.log(`Received ${signal}, shutting down gracefully ...`);
+        const forceExitTimeout = setTimeout(() => {
+            console.error("Shutting down timeout, forcing exit.");
+            process.exit(1);
+        }, 15000);
+        forceExitTimeout.unref();
+        try {
+            await promisify(server.close.bind(server))();
+            await saveCache();
+            console.log("Cleanup completed successfully.");
+            process.exit(0);
+        } catch (e) {
+            console.error("Error during cleanup:", e);
+            process.exit(1);
+        }
     }
 
-    process.on("SIGINT", onExit);
-    process.on("SIGTERM", onExit);
-    process.on("SIGUSR1", onExit);
-    process.on("SIGUSR2", onExit);
+    ["SIGINT", "SIGTERM"].forEach((signal) => {
+        process.on(signal, () => onExit(signal));
+    });
+
+    process.on("unhandledRejection", (reason, promise) => {
+        console.error("Unhandled Rejection at:", promise, "reason:", reason);
+        onExit("unhandledRejection");
+    });
+    process.on("uncaughtException", (error) => {
+        console.error("Uncaught Exception:", error);
+        onExit("uncaughtException");
+    });
 }
 
 main();
