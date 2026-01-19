@@ -297,10 +297,9 @@ async function main() {
     });
 
     let isShuttingDown = false;
-    async function onExit(signal: string) {
+    function onExit(signal: string) {
         if (isShuttingDown) return;
         isShuttingDown = true;
-        const keepAlive = setInterval(() => {}, 1000);
         console.log(`Received ${signal}, shutting down gracefully ...`);
         if (process.env.NODE_ENV !== "development") {
             const forceExitTimeout = setTimeout(() => {
@@ -314,11 +313,8 @@ async function main() {
             saveCache();
             console.log("Closing server...");
             if (server && server.listening) {
-                await promisify(server.close.bind(server))();
+                server.close();
             }
-            console.log("Cleanup completed successfully.");
-            clearInterval(keepAlive);
-            process.exit(0);
         } catch (e) {
             console.error("Error during cleanup:", e);
             process.exit(1);
