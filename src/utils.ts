@@ -185,6 +185,21 @@ export enum FetchType {
   POST,
 }
 
+export async function checkFlareSolverrSessionCreated() {
+  const url = process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      cmd: "sessions.list",
+    }),
+  });
+  const sessions: string[] = JSON.parse(await res.text()).sessions;
+  return sessions.includes("LDS-Session");
+}
+
 export async function fetchWithFlareSolverr(
   url: string,
   mode: FetchType = FetchType.GET,
@@ -194,7 +209,10 @@ export async function fetchWithFlareSolverr(
     const flareSolverrUrl =
       process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
     if (!flareSolverrSessionCreated) {
-      await createflareSolverrSession();
+      const sessionCreated = checkFlareSolverrSessionCreated();
+      if (!sessionCreated) {
+        await createflareSolverrSession();
+      }
     }
     let res: Response | null = null;
     switch (mode) {
