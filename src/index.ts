@@ -6,13 +6,6 @@ import { fetchHtml } from "./utils";
 import { CheerioAPI, load } from "cheerio";
 import { type AnyNode, type Element } from "domhandler";
 
-async function fetchAndDecryptPage(path: string): Promise<string> {
-    const url = `https://www.linovelib.com${path}`;
-    const html = await fetchHtml(url);
-    const decryptedContent = await decrypt(html);
-    return decryptedContent;
-}
-
 async function main() {
     const app = express();
     app.use(express.json());
@@ -38,8 +31,11 @@ async function main() {
             return res.status(400).json({ error: "Path is required" });
         }
         try {
-            res.json({ content: await fetchAndDecryptPage(path) });
-        } catch(e) {
+            const url = `https://www.linovelib.com${path}`;
+            const html = await fetchHtml(url);
+            const decryptedContent = await decrypt(html);
+            res.json({ content: decryptedContent });
+        } catch (e) {
             console.error("Error fetching chapter:", e);
             res.status(500).json({ error: "Failed to fetch chapter" });
         }
@@ -51,20 +47,28 @@ async function main() {
             return res.status(400).json({ error: "Path is required" });
         }
         try {
-            const firstPageHtml = await fetchHtml(`https://www.linovelib.com${path}`);
-            const novelId = path.split('/')[2];
-            const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || '';
+            const firstPageHtml = await fetchHtml(
+                `https://www.linovelib.com${path}`,
+            );
+            const novelId = path.split("/")[2];
+            const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || "";
             let $ = load(firstPageHtml);
-            let nextPageId = $('div.mlfy_page a:last').attr('href')?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2];
+            let nextPageId = $("div.mlfy_page a:last")
+                .attr("href")
+                ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
-                const nextPageHtml = await fetchHtml(`https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`);
+                const nextPageHtml = await fetchHtml(
+                    `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
+                );
                 content += await decrypt(nextPageHtml);
                 $ = load(nextPageHtml);
-                nextPageId = $('div.mlfy_page a:last').attr('href')?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2];
+                nextPageId = $("div.mlfy_page a:last")
+                    .attr("href")
+                    ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
             res.json({ content });
-        } catch(e) {
+        } catch (e) {
             console.error("Error fetching chapter:", e);
             res.status(500).json({ error: "Failed to fetch chapter" });
         }
@@ -79,7 +83,7 @@ async function main() {
             console.log(
                 `Server is running on http://localhost:${
                     process.env.PORT || 5301
-                }`
+                }`,
             );
         }
     });
