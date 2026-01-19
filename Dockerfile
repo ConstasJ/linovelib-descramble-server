@@ -3,6 +3,8 @@ FROM node:22-alpine AS builder
 
 ARG NPM_REGISTRY=https://registry.npmjs.org
 
+ENV PUPPETEER_SKIP_DOWNLOAD true
+
 WORKDIR /app
 
 # Install pnpm
