@@ -1,3 +1,5 @@
+import puppeteer, { Browser } from "puppeteer";
+
 export async function fetchHtml(url: string): Promise<string> {
     const requestInit: RequestInit = {
         method: "GET",
@@ -207,4 +209,18 @@ export async function fetchWithFlareSolverr(
     }
     const data = await res.json();
     return data.solution.response;
+}
+
+let puppeteerBrowser: Browser | null = null;
+
+export async function getPuppeteerBrowser(): Promise<Browser> {
+    if (puppeteerBrowser) {
+        return puppeteerBrowser;
+    } else {
+        puppeteerBrowser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+        return puppeteerBrowser;
+    }
 }

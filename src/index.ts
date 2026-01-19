@@ -2,7 +2,14 @@ import express, { Router } from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
-import { fetchHtml, FetchType, fetchWithFlareSolverr, transformChapterName, transformContent } from "./utils";
+import {
+    fetchHtml,
+    FetchType,
+    fetchWithFlareSolverr,
+    getPuppeteerBrowser,
+    transformChapterName,
+    transformContent,
+} from "./utils";
 import { CheerioAPI, load } from "cheerio";
 import puppeteer from "puppeteer";
 
@@ -116,7 +123,9 @@ async function main() {
                     .toArray();
                 for (const chapEl of chapterEls) {
                     const chapterEl = catalogCheerio(chapEl);
-                    const chapterName = transformChapterName(chapterEl.text().trim());
+                    const chapterName = transformChapterName(
+                        chapterEl.text().trim(),
+                    );
                     const chapterPath = chapterEl.attr("href") || "";
 
                     if (chapterPath.includes("javascript:cid(0)")) {
@@ -167,26 +176,71 @@ async function main() {
             return res.status(400).json({ error: "Keyword is required" });
         }
         try {
-            const homeUrl = `https://www.linovelib.com/`;
-            const browser = await puppeteer.launch({ 
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            });
-            const page = await browser.newPage();
-            await page.goto(homeUrl, { waitUntil: "networkidle2" });
+            const homeUrl = `https://www.linovelib.com`;
+            const browser = await getPuppeteerBrowser();
+            const page =
+                (await browser.pages())[0] || (await browser.newPage());
+            await page.goto(homeUrl, { waitUntil: "domcontentloaded" });
             await page.type("input[name='searchkey']", keyword);
-            await Promise.all([
-                page.keyboard.press("Enter"),
-                new Promise(resolve => setTimeout(resolve, 3000)),
-            ]);
-            const searchResultsHtml = await page.content();
-            await browser.close();
-            const $ = load(searchResultsHtml);
-        } catch(e) {
+            await new Promise((r) => setTimeout(r, 700));
+            (await page.keyboard.press("Enter"),
+                await page.waitForSelector("div.head-fixed"));
+            const searchResultsFPHtml = await page.content();
+            const $1 = load(searchResultsFPHtml);
+            if ($1("div.book-html-box").length > 0) {
+                const results: { name: string; path: string; cover: string }[] = [
+                    {
+                        name: $1("h1.book-name").text().trim(),
+                        path: page.url().replace(homeUrl, ""),
+                        cover: $1("div.book-img img").attr("src") || "",
+                    }
+                ]
+                return res.json({ results });
+            }
+            const pages =
+                $1("em#pagestats")
+                    .text()
+                    .match(/1\/(\d+)/)?.[1] || "1";
+            const results: { name: string; path: string; cover: string }[] = [];
+            $1("div.search-html-box div.search-result-list").each((_, el) => {
+                const el$ = $1(el);
+                const name = el$.find("h2").text().trim();
+                const path = el$.find("h2 a").attr("href") || "";
+                const cover = el$.find("img").attr("src") || "";
+                results.push({ name, path, cover });
+            });
+            if (Number(pages) > 1) {
+                let currentPageHtml = searchResultsFPHtml;
+                while (true) {
+                    const $2 = load(currentPageHtml);
+                    if ($2("a.next").length > 0) {
+                        await Promise.all([
+                            page.click("a.next"),
+                            page.waitForNavigation({
+                                waitUntil: "domcontentloaded",
+                            }),
+                        ]);
+                    }
+                    currentPageHtml = await page.content();
+                    const $3 = load(currentPageHtml);
+                    $2("div.search-html-box div.search-result-list").each(
+                        (_, el) => {
+                            const el$ = $3(el);
+                            const name = el$.find("h2").text().trim();
+                            const path = el$.find("h2 a").attr("href") || "";
+                            const cover = el$.find("img").attr("src") || "";
+                            results.push({ name, path, cover });
+                        },
+                    );
+                    if ($3("a.next").length === 0) break;
+                }
+            }
+            res.json({ results });
+        } catch (e) {
             console.error("Error performing search:", e);
             res.status(500).json({ error: "Failed to perform search" });
         }
-    })
+    });
 
     app.use("/api", apiRouter);
 
