@@ -2,8 +2,9 @@ import express, { Router } from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
-import { fetchHtml } from "./utils";
+import { fetchHtml, FetchType, fetchWithFlareSolverr, transformChapterName, transformContent } from "./utils";
 import { CheerioAPI, load } from "cheerio";
+import puppeteer from "puppeteer";
 
 async function main() {
     const app = express();
@@ -68,7 +69,7 @@ async function main() {
                         .attr("href")
                         ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
-            res.json({ content });
+            res.json({ content: transformContent(content) });
         } catch (e) {
             console.error("Error fetching chapter:", e);
             res.status(500).json({ error: "Failed to fetch chapter" });
@@ -115,7 +116,7 @@ async function main() {
                     .toArray();
                 for (const chapEl of chapterEls) {
                     const chapterEl = catalogCheerio(chapEl);
-                    const chapterName = chapterEl.text().trim();
+                    const chapterName = transformChapterName(chapterEl.text().trim());
                     const chapterPath = chapterEl.attr("href") || "";
 
                     if (chapterPath.includes("javascript:cid(0)")) {
@@ -159,6 +160,33 @@ async function main() {
             res.status(500).json({ error: "Failed to fetch novel info" });
         }
     });
+
+    apiRouter.post("/search", async (req, res) => {
+        const { keyword } = req.body;
+        if (!keyword) {
+            return res.status(400).json({ error: "Keyword is required" });
+        }
+        try {
+            const homeUrl = `https://www.linovelib.com/`;
+            const browser = await puppeteer.launch({ 
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            });
+            const page = await browser.newPage();
+            await page.goto(homeUrl, { waitUntil: "networkidle2" });
+            await page.type("input[name='searchkey']", keyword);
+            await Promise.all([
+                page.keyboard.press("Enter"),
+                new Promise(resolve => setTimeout(resolve, 3000)),
+            ]);
+            const searchResultsHtml = await page.content();
+            await browser.close();
+            const $ = load(searchResultsHtml);
+        } catch(e) {
+            console.error("Error performing search:", e);
+            res.status(500).json({ error: "Failed to perform search" });
+        }
+    })
 
     app.use("/api", apiRouter);
 
