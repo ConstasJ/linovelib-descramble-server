@@ -228,7 +228,7 @@ export async function getPuppeteerBrowser(): Promise<Browser> {
         return puppeteerBrowser;
     } else {
         puppeteerBrowser = await puppeteer.launch({
-            headless: true,
+            headless: process.env.NODE_ENV !== "development",
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
         });
         return puppeteerBrowser;

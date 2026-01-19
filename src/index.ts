@@ -21,7 +21,7 @@ async function main() {
     await loadCache();
     const app = express();
     app.use(express.json());
-    app.use(morgan("dev"));
+    app.use(morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"));
 
     const apiRouter = express.Router();
 
