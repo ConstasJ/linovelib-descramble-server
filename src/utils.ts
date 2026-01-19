@@ -13,7 +13,17 @@ export async function fetchHtml(url: string): Promise<string> {
         },
     };
     const response = await fetch(url, requestInit);
-    return await response.text();
+    let html = await response.text();
+    // Handle potential Cloudflare protection
+    if (
+        html.includes("cloudflare") ||
+        html.includes("Attention Required!") ||
+        html.includes("cf-browser-verification") ||
+        html.includes("Just a moment")
+    ) {
+        html = await fetchWithFlareSolverr(url, FetchType.GET);
+    }
+    return html;
 }
 
 export function transformChapterName(name: string): string {
@@ -219,7 +229,7 @@ export async function getPuppeteerBrowser(): Promise<Browser> {
     } else {
         puppeteerBrowser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
         });
         return puppeteerBrowser;
     }

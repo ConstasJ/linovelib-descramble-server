@@ -53,6 +53,16 @@ export async function decrypt(html: string): Promise<string> {
       }
     });
 
+    container.find('img.imagecontent').each((_, el) => {
+      const imgSrc = $(el).attr('data-src') || $(el).attr('src');
+      if (imgSrc) {
+        $(el)
+          .attr('src', imgSrc)
+          .removeAttr('data-src')
+          .removeClass('lazyload');
+      }
+    });
+
     container.find("div.dag").remove();
     container.find("script").remove();
 

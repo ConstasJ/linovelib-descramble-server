@@ -1,17 +1,14 @@
-import express, { Router } from "express";
+import express from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
 import {
     fetchHtml,
-    FetchType,
-    fetchWithFlareSolverr,
     getPuppeteerBrowser,
     transformChapterName,
     transformContent,
 } from "./utils";
-import { CheerioAPI, load } from "cheerio";
-import puppeteer from "puppeteer";
+import { load } from "cheerio";
 import { addToNovelsCache, searchNovelsInCache } from "./cache";
 
 async function main() {
@@ -61,6 +58,7 @@ async function main() {
             const novelId = path.split("/")[2];
             const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || "";
             let $ = load(firstPageHtml);
+            const chapterName = $("h1").text().trim();
             let nextPageId =
                 $("div.mlfy_page a:last")
                     .attr("href")
@@ -77,7 +75,7 @@ async function main() {
                         .attr("href")
                         ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
-            res.json({ content: transformContent(content) });
+            res.json({ content: "<h2>" + chapterName + "</h2>\n" + transformContent(content) });
         } catch (e) {
             console.error("Error fetching chapter:", e);
             res.status(500).json({ error: "Failed to fetch chapter" });
@@ -106,9 +104,9 @@ async function main() {
                 .toArray()
                 .join(",");
             const catalogUrl = `https://www.linovelib.com${$("a.read-btn").attr("href")}`;
-            const catalogHtml = await fetchHtml(catalogUrl);
+            let catalogHtml = await fetchHtml(catalogUrl);
             const catalogCheerio = load(catalogHtml);
-            const chapters: { name: string; path: string }[] = [];
+            const chapters: { name: string; path: string, releaseTime: string | null }[] = [];
             const volumes = catalogCheerio("#volume-list div.volume").toArray();
             let lastChapNotIdentified = false;
             let lastChapterName = "";
@@ -146,6 +144,7 @@ async function main() {
                         chapters.push({
                             name: `${volumeName} - ${lastChapterName}`,
                             path: lastChapterPath || "",
+                            releaseTime: null,
                         });
                         lastChapNotIdentified = false;
                     }
@@ -153,11 +152,13 @@ async function main() {
                     chapters.push({
                         name: `${volumeName} - ${chapterName}`,
                         path: chapterPath,
+                        releaseTime: null,
                     });
                 }
             }
             res.json({
                 name,
+                path,
                 cover,
                 summary,
                 author,
