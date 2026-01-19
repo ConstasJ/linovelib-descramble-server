@@ -15,7 +15,6 @@ import {
     saveCache,
     searchNovelsInCache,
 } from "./cache";
-import { promisify } from "node:util";
 
 async function main() {
     await loadCache();
