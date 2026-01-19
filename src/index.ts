@@ -4,7 +4,6 @@ import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
 import { fetchHtml } from "./utils";
 import { CheerioAPI, load } from "cheerio";
-import { type AnyNode, type Element } from "domhandler";
 
 async function main() {
     const app = express();
