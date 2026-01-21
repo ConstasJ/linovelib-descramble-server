@@ -21,7 +21,7 @@ import {
     setCache,
     setNovelContentToCache,
 } from "./cache";
-import { searchQueue } from "./queue";
+import { novelChapterQueue, searchQueue } from "./queue";
 
 async function main() {
     await loadCache();
@@ -69,7 +69,7 @@ async function main() {
             return res.status(400).json({ error: "Path is required" });
         }
         try {
-            const firstPageHtml = await fetchText(
+            const firstPageHtml = await novelChapterQueue.fetchChapterPartContent(
                 `https://www.linovelib.com${path}`,
             );
             const novelId = path.split("/")[2] || "0";
@@ -89,8 +89,7 @@ async function main() {
                     ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
-                await new Promise((r) => setTimeout(r, Math.random() * 500 + 500));
-                const nextPageHtml = await fetchText(
+                const nextPageHtml = await novelChapterQueue.fetchChapterPartContent(
                     `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
                 );
                 content += await decrypt(nextPageHtml);
@@ -193,7 +192,7 @@ async function main() {
 
                     if (lastChapNotIdentified) {
                         await new Promise((r) => setTimeout(r, 200));
-                        const html = await fetchText(
+                        const html = await novelChapterQueue.fetchChapterPartContent(
                             `https://www.linovelib.com${chapterPath}`,
                         );
                         const $temp = load(html);
@@ -241,52 +240,8 @@ async function main() {
             return res.json({ results: cacheResults });
         }
         try {
-            const fp = await searchQueue.execute(async () => {
-                let haha: string = getCache("haha") || "";
-                let resp = await fetchWithAppliance(
-                    "https://www.linovelib.com/S6/",
-                    FetchType.POST,
-                    `searchkey=${encodeURIComponent(keyword)}`,
-                    { haha },
-                );
-                let $ = load(resp);
-                if ($("#challenge-running").length > 0) {
-                    let a = "",
-                        b = "",
-                        c = "";
-                    $("script").each((_, el) => {
-                        const scriptContent = $(el).html() || "";
-                        if (/window\.a\s*=\s*'([^']+)'/.test(scriptContent)) {
-                            a =
-                                scriptContent.match(
-                                    /window\.a\s*=\s*'([^']+)'/,
-                                )?.[1] || "";
-                            b =
-                                scriptContent.match(
-                                    /window\.b\s*=\s*'([^']+)'/,
-                                )?.[1] || "";
-                            c =
-                                scriptContent.match(
-                                    /window\.c\s*=\s*'([^']+)'/,
-                                )?.[1] || "";
-                        }
-                    });
-                    haha = await solveSearchChallenge(a, b, c);
-                    await new Promise((r) => setTimeout(r, 3000));
-                    resp = await fetchWithAppliance(
-                        "https://www.linovelib.com/S6/",
-                        FetchType.POST,
-                        `searchkey=${encodeURIComponent(keyword)}`,
-                        { haha },
-                    );
-                    $ = load(resp);
-                    if ($("#challenge-running").length === 0) {
-                        setCache("haha", haha);
-                    }
-                }
-                return resp;
-            });
-            let $ = load(fp);
+            const fp = await searchQueue.performFirstSearch(keyword);
+            const $ = load(fp);
             if ($("div.book-html-box").length > 0) {
                 const results: { name: string; path: string; cover: string }[] =
                     [
