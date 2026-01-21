@@ -69,11 +69,12 @@ async function main() {
             return res.status(400).json({ error: "Path is required" });
         }
         try {
-            const firstPageHtml = await novelChapterQueue.fetchChapterPartContent(
-                `https://www.linovelib.com${path}`,
-            );
-            const novelId = path.split("/")[2] || "0";
-            const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || "0";
+            const matches = path.match(/\/novel\/(\d+)\/([\d_]+)\.html/);
+            if (!matches) {
+                return res.status(400).json({ error: "Invalid chapter path" });
+            }
+            const novelId = matches[1] || "0";
+            const chapterId = matches[2] || "0";
             const cache = getNovelContentFromCache(
                 parseInt(novelId),
                 parseInt(chapterId),
@@ -81,6 +82,9 @@ async function main() {
             if (cache) {
                 return res.json({ content: cache });
             }
+            const firstPageHtml = await novelChapterQueue.fetchChapterPartContent(
+                `https://www.linovelib.com${path}`,
+            );
             let $ = load(firstPageHtml);
             const chapterName = $("h1").text().trim();
             let nextPageId =
