@@ -9,17 +9,17 @@ export async function fetchText(
         const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
         const result = res.toLowerCase();
         if (
-            result.startsWith("limited") ||
+            result.startsWith("limit") ||
             result.startsWith("attention") ||
-            result.includes("protected") ||
-            result.includes("restricted") ||
+            result.includes("protect") ||
+            result.includes("restrict") ||
             result.includes("Just a moment")
         ) {
             console.warn(`Access limited detected for ${url}, retrying after 500ms delay...`);
-            await new Promise((r) => setTimeout(r, 500));
-            continue;
+            await new Promise((r) => setTimeout(r, Math.random() * 3000 + 2000));
+        } else {
+            return res;
         }
-        return res;
     }
 }
 

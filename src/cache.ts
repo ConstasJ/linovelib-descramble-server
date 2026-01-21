@@ -55,6 +55,29 @@ export function searchNovelsInCache(query: string): NovelItem[] {
     }
 }
 
+const novelContentCache: Map<number, Map<number, string>> = new Map();
+
+export function getNovelContentFromCache(
+    novelId: number,
+    chapterId: number,
+): string | undefined {
+    if (novelContentCache.has(novelId)) {
+        return novelContentCache.get(novelId)!.get(chapterId);
+    }
+    return undefined;
+}
+
+export function setNovelContentToCache(
+    novelId: number,
+    chapterId: number,
+    content: string,
+): void {
+    if (!novelContentCache.has(novelId)) {
+        novelContentCache.set(novelId, new Map());
+    }
+    novelContentCache.get(novelId)!.set(chapterId, content);
+}
+
 export function createDataDirIfNotExists() {
     if (!existsSync(dataDir)) {
         mkdirSync(dataDir, { recursive: true });
@@ -72,6 +95,13 @@ export function saveCache() {
         lastUpdate: Date.now(),
         novels: novelsCache,
         keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
+        novelContentCache: Array.from(novelContentCache).reduce(
+            (acc, [novelId, chapterMap]) => {
+                acc[novelId] = Object.fromEntries(chapterMap);
+                return acc;
+            },
+            {} as Record<number, Record<number, string>>,
+        ),
     };
     // merge generalCache into cacheData
     for (const [key, value] of generalCache.entries()) {
@@ -90,6 +120,16 @@ export async function loadCache(): Promise<void> {
             cacheData.keywordsToNovelsMap,
         )) {
             keywordsToNovelsMap.set(key, value as KTNMValue);
+        }
+        for (const [novelIdStr, chapterObj] of Object.entries(
+            cacheData.novelContentCache,
+        )) {
+            const novelId = parseInt(novelIdStr);
+            const chapterMap = new Map<number, string>();
+            for (const [chapterIdStr, content] of Object.entries(chapterObj as Record<string, string>)) {
+                chapterMap.set(parseInt(chapterIdStr), content as string);
+            }
+            novelContentCache.set(novelId, chapterMap);
         }
         // extract other entries into generalCache
         for (const [key, value] of Object.entries(cacheData)) {

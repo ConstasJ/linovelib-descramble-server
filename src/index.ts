@@ -14,10 +14,12 @@ import { load } from "cheerio";
 import {
     addToNovelsCache,
     getCache,
+    getNovelContentFromCache,
     loadCache,
     saveCache,
     searchNovelsInCache,
     setCache,
+    setNovelContentToCache,
 } from "./cache";
 import { searchQueue } from "./queue";
 
@@ -70,8 +72,15 @@ async function main() {
             const firstPageHtml = await fetchText(
                 `https://www.linovelib.com${path}`,
             );
-            const novelId = path.split("/")[2];
-            const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || "";
+            const novelId = path.split("/")[2] || "0";
+            const chapterId = firstPageHtml.match(/cid="(\d+)"/)?.[1] || "0";
+            const cache = getNovelContentFromCache(
+                parseInt(novelId),
+                parseInt(chapterId),
+            )
+            if (cache) {
+                return res.json({ content: cache });
+            }
             let $ = load(firstPageHtml);
             const chapterName = $("h1").text().trim();
             let nextPageId =
@@ -80,7 +89,7 @@ async function main() {
                     ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
-                await new Promise((r) => setTimeout(r, 500));
+                await new Promise((r) => setTimeout(r, Math.random() * 500 + 500));
                 const nextPageHtml = await fetchText(
                     `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
                 );
@@ -91,12 +100,14 @@ async function main() {
                         .attr("href")
                         ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
+            content = `<h2>${chapterName}</h2>\n` + transformContent(content);
+            setNovelContentToCache(
+                parseInt(novelId),
+                parseInt(chapterId) || 0,
+                content,
+            );
             res.json({
-                content:
-                    "<h2>" +
-                    chapterName +
-                    "</h2>\n" +
-                    transformContent(content),
+                content
             });
         } catch (e) {
             console.error("Error fetching chapter:", e);
@@ -142,7 +153,7 @@ async function main() {
                 releaseTime: string | null;
             }[] = [];
             const volumes = catalogCheerio("#volume-list div.volume").toArray();
-            const novelId = path.split("/")[2];
+            const novelId = path.match(/\/novel\/(\d+).html/)?.[1] || "";
             let lastChapNotIdentified = false;
             let lastChapterName = "";
             let chapterId = 0;
