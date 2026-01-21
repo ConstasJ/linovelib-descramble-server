@@ -1,6 +1,6 @@
 import { webcrypto } from "node:crypto";
 import { load } from "cheerio";
-import pRetry from 'p-retry';
+import pRetry from "p-retry";
 
 class AccessDeniedError extends Error {
     constructor(message: string) {
@@ -9,36 +9,48 @@ class AccessDeniedError extends Error {
     }
 }
 
-export async function fetchText(
+export function fetchText(
     url: string,
     cookies?: Record<string, string>,
 ): Promise<string> {
-    return await pRetry(async () => {
-        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
+    return pRetry(
+        async () => {
+            const res = await fetchWithAppliance(
+                url,
+                FetchType.GET,
+                undefined,
+                cookies,
+            );
 
-        const snippet = res.slice(0, 1024).toLowerCase();
-        
-        // const isBlocked = [
-        //     "limit", "attention", "protect", "restrict", "just a moment"
-        // ].some(keyword => snippet.includes(keyword));
-        const isBlocked = /(limit|attention|protect|restrict|just a moment)/.test(snippet);
-        if (isBlocked) {
-            // 可以在这里增加一个 log，记录到底是哪个词触发了拦截
-            throw new AccessDeniedError(`Access limited detected for ${url}`);
-        }
-        
-        return res;
-    }, {
-        shouldRetry: (error) => error instanceof AccessDeniedError,
-        onFailedAttempt: (ctx) => {
-            // 指数级减少日志噪音
-            console.warn(`[fetchText] Attempt ${ctx.attemptNumber} failed. Retrying...`);
+            const snippet = res.slice(0, 1024).toLowerCase();
+
+            const isBlocked =
+                /(limit|attention|protect|restrict|just a moment)/.test(
+                    snippet,
+                );
+            if (isBlocked) {
+                // 可以在这里增加一个 log，记录到底是哪个词触发了拦截
+                throw new AccessDeniedError(
+                    `Access limited detected for ${url}`,
+                );
+            }
+
+            return res;
         },
-        minTimeout: 2000, 
-        maxTimeout: 8000, // 稍微拉开上限，增加随机性
-        retries: 3,      // 降低重试次数，防止长时间阻塞排队队列
-        randomize: true,
-    });
+        {
+            shouldRetry: ({ error }) => error instanceof AccessDeniedError,
+            onFailedAttempt: ({ attemptNumber }) => {
+                // 指数级减少日志噪音
+                console.warn(
+                    `[fetchText] Attempt ${attemptNumber} failed. Retrying...`,
+                );
+            },
+            minTimeout: 2000,
+            maxTimeout: 8000, // 稍微拉开上限，增加随机性
+            retries: 3, // 降低重试次数，防止长时间阻塞排队队列
+            randomize: true,
+        },
+    );
 }
 
 export function transformChapterName(name: string): string {
@@ -178,8 +190,7 @@ export async function fetchWithAppliance(
     body?: string,
     cookies?: Record<string, string>,
 ): Promise<string> {
-    const applianceUrl =
-        process.env.APPLIANCE_URL || "http://localhost:5302";
+    const applianceUrl = process.env.APPLIANCE_URL || "http://localhost:5302";
     try {
         let res: Response | null = null;
         switch (mode) {
@@ -224,34 +235,35 @@ export async function fetchWithAppliance(
 }
 
 function k(e: string): Uint8Array<ArrayBuffer> {
-  // 标准 Base64 映射表
-  const t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  
-  // 1. 过滤掉所有不在映射表中的字符 (对应原代码的正则)
-  const n = e.replace(/[^A-Za-z0-9+/]/g, "");
-  const r = n.length;
-  
-  // 2. 计算输出长度：每 4 个字符转为 3 个字节
-  // 注意：原代码通常不处理末尾填充，直接通过位移计算
-  const buf = new Uint8Array(Math.floor(r * 0.75));
-  let i = 0, // buf 指针
-      a = 0, // 累加器
-      s = 0, // 当前位深
-      c = 0; // 临时索引
-  for (let l = 0; l < r; l++) {
-    c = t.indexOf(n[l] || '');
-    if (c === -1) continue; // 安全检查
-    a = (a << 6) | c; // 每个 Base64 字符携带 6 位信息
-    s += 6;
-    if (s >= 8) {
-      s -= 8;
-      // 提取高 8 位存入字节数组
-      buf[i++] = (a >> s) & 255;
+    // 标准 Base64 映射表
+    const t =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    // 1. 过滤掉所有不在映射表中的字符 (对应原代码的正则)
+    const n = e.replace(/[^A-Za-z0-9+/]/g, "");
+    const r = n.length;
+
+    // 2. 计算输出长度：每 4 个字符转为 3 个字节
+    // 注意：原代码通常不处理末尾填充，直接通过位移计算
+    const buf = new Uint8Array(Math.floor(r * 0.75));
+    let i = 0, // buf 指针
+        a = 0, // 累加器
+        s = 0, // 当前位深
+        c = 0; // 临时索引
+    for (let l = 0; l < r; l++) {
+        c = t.indexOf(n[l] || "");
+        if (c === -1) continue; // 安全检查
+        a = (a << 6) | c; // 每个 Base64 字符携带 6 位信息
+        s += 6;
+        if (s >= 8) {
+            s -= 8;
+            // 提取高 8 位存入字节数组
+            buf[i++] = (a >> s) & 255;
+        }
     }
-  }
-  // 关键：必须截取到实际写入的长度
-  // 并强制转换为 Uint8Array<ArrayBuffer>
-  return new Uint8Array(buf.buffer.slice(0, i)) as Uint8Array<ArrayBuffer>;
+    // 关键：必须截取到实际写入的长度
+    // 并强制转换为 Uint8Array<ArrayBuffer>
+    return new Uint8Array(buf.buffer.slice(0, i)) as Uint8Array<ArrayBuffer>;
 }
 
 export async function solveSearchChallenge(
@@ -259,33 +271,33 @@ export async function solveSearchChallenge(
     b: string,
     c: string,
 ): Promise<string> {
-  const subtle = webcrypto.subtle;
-  // 使用 as Uint8Array 明确告诉 TS 这是它需要的 BufferSource
-  const keyData = k(a);
-  const counterData = k(b);
-  const encryptedData = k(c);
-  try {
-    const cryptoKey = await subtle.importKey(
-      "raw",
-      keyData,
-      { name: "AES-CTR" },
-      false,
-      ["decrypt"]
-    );
-    const decryptedBuffer = await subtle.decrypt(
-      {
-        name: "AES-CTR",
-        counter: counterData,
-        length: 64
-      },
-      cryptoKey,
-      encryptedData
-    );
-    // decryptedBuffer 得到的是 ArrayBuffer，需要转回 Uint8Array 供 TextDecoder 使用
-    const decoder = new TextDecoder();
-    const plainText = decoder.decode(new Uint8Array(decryptedBuffer));
-    return encodeURIComponent(plainText);
-  } catch (error) {
-    throw new Error(`解密失败: ${error}`);
-  }
+    const subtle = webcrypto.subtle;
+    // 使用 as Uint8Array 明确告诉 TS 这是它需要的 BufferSource
+    const keyData = k(a);
+    const counterData = k(b);
+    const encryptedData = k(c);
+    try {
+        const cryptoKey = await subtle.importKey(
+            "raw",
+            keyData,
+            { name: "AES-CTR" },
+            false,
+            ["decrypt"],
+        );
+        const decryptedBuffer = await subtle.decrypt(
+            {
+                name: "AES-CTR",
+                counter: counterData,
+                length: 64,
+            },
+            cryptoKey,
+            encryptedData,
+        );
+        // decryptedBuffer 得到的是 ArrayBuffer，需要转回 Uint8Array 供 TextDecoder 使用
+        const decoder = new TextDecoder();
+        const plainText = decoder.decode(new Uint8Array(decryptedBuffer));
+        return encodeURIComponent(plainText);
+    } catch (error) {
+        throw new Error(`解密失败: ${error}`);
+    }
 }
