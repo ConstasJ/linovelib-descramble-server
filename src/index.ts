@@ -19,7 +19,6 @@ import {
     searchNovelsInCache,
     setCache,
 } from "./cache";
-import { webcrypto } from "node:crypto";
 import { searchQueue } from "./queue";
 
 async function main() {
@@ -119,7 +118,7 @@ async function main() {
                 const $container = $(".book-dec.Jbook-dec").clone();
                 $container.find(".notice").remove();
                 const paragraphs: string[] = [];
-                $container.find("p").each((_, el) => {
+                $container.find("p").not(".backupname").each((_, el) => {
                     paragraphs.push($(el).text().trim());
                 });
                 return paragraphs.join("\n");
