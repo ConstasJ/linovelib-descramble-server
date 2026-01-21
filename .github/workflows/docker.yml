@@ -26,7 +26,7 @@ jobs:
               id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: ghcr.io/${{ github.repository }}/linovelib-descramble-server
+                  images: ghcr.io/${{ github.repository }}
 
             - name: Build and push Docker image
               uses: docker/build-push-action@v6
