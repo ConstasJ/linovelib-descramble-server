@@ -3,18 +3,24 @@ import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
 import {
-    fetchHtml,
-    getPuppeteerBrowser,
+    fetchText,
+    FetchType,
+    fetchWithAppliance,
+    solveSearchChallenge,
     transformChapterName,
     transformContent,
 } from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
+    getCache,
     loadCache,
     saveCache,
     searchNovelsInCache,
+    setCache,
 } from "./cache";
+import { webcrypto } from "node:crypto";
+import { searchQueue } from "./queue";
 
 async function main() {
     await loadCache();
@@ -31,7 +37,7 @@ async function main() {
     apiRouter.get("/coefficients", async (_, res) => {
         const url = "https://www.linovelib.com/novel/2186/78033_4.html";
         try {
-            const html = await fetchHtml(url);
+            const html = await fetchText(url);
             const coefficients = await getCoefficientsFromPage(html);
             res.json({ coefficients });
         } catch (error) {
@@ -47,7 +53,7 @@ async function main() {
         }
         try {
             const url = `https://www.linovelib.com${path}`;
-            const html = await fetchHtml(url);
+            const html = await fetchText(url);
             const decryptedContent = await decrypt(html);
             res.json({ content: decryptedContent });
         } catch (e) {
@@ -62,7 +68,7 @@ async function main() {
             return res.status(400).json({ error: "Path is required" });
         }
         try {
-            const firstPageHtml = await fetchHtml(
+            const firstPageHtml = await fetchText(
                 `https://www.linovelib.com${path}`,
             );
             const novelId = path.split("/")[2];
@@ -75,7 +81,7 @@ async function main() {
                     ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
-                const nextPageHtml = await fetchHtml(
+                const nextPageHtml = await fetchText(
                     `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
                 );
                 content += await decrypt(nextPageHtml);
@@ -105,7 +111,7 @@ async function main() {
         }
         try {
             const url = `https://www.linovelib.com${path}`;
-            const html = await fetchHtml(url);
+            const html = await fetchText(url);
             const $ = load(html);
             const name = $("h1.book-name").text().trim();
             const cover = $("div.book-img img").attr("src") || "";
@@ -128,7 +134,7 @@ async function main() {
                 .toArray()
                 .join(",");
             const catalogUrl = `https://www.linovelib.com${$("a.read-btn").attr("href")}`;
-            let catalogHtml = await fetchHtml(catalogUrl);
+            let catalogHtml = await fetchText(catalogUrl);
             const catalogCheerio = load(catalogHtml);
             const chapters: {
                 name: string;
@@ -175,7 +181,7 @@ async function main() {
                     }
 
                     if (lastChapNotIdentified) {
-                        const html = await fetchHtml(
+                        const html = await fetchText(
                             `https://www.linovelib.com${chapterPath}`,
                         );
                         const $temp = load(html);
@@ -223,57 +229,87 @@ async function main() {
             return res.json({ results: cacheResults });
         }
         try {
-            const homeUrl = `https://www.linovelib.com`;
-            const browser = await getPuppeteerBrowser();
-            const page =
-                (await browser.pages())[0] || (await browser.newPage());
-            await page.goto(homeUrl, { waitUntil: "networkidle2" });
-            await page.type("input[name='searchkey']", keyword);
-            await new Promise((r) => setTimeout(r, 700));
-            await page.keyboard.press("Enter");
-            await new Promise((r) => setTimeout(r, 1000));
-            await page.waitForSelector("div.head-fixed");
-            const searchResultsFPHtml = await page.content();
-            const $1 = load(searchResultsFPHtml);
-            if ($1("div.book-html-box").length > 0) {
+            const fp = await searchQueue.execute(async () => {
+                let haha: string = getCache("haha") || "";
+                let resp = await fetchWithAppliance(
+                    "https://www.linovelib.com/S6/",
+                    FetchType.POST,
+                    `searchkey=${encodeURIComponent(keyword)}`,
+                    { haha },
+                );
+                let $ = load(resp);
+                if ($("#challenge-running").length > 0) {
+                    let a = "",
+                        b = "",
+                        c = "";
+                    $("script").each((_, el) => {
+                        const scriptContent = $(el).html() || "";
+                        if (/window\.a\s*=\s*'([^']+)'/.test(scriptContent)) {
+                            a =
+                                scriptContent.match(
+                                    /window\.a\s*=\s*'([^']+)'/,
+                                )?.[1] || "";
+                            b =
+                                scriptContent.match(
+                                    /window\.b\s*=\s*'([^']+)'/,
+                                )?.[1] || "";
+                            c =
+                                scriptContent.match(
+                                    /window\.c\s*=\s*'([^']+)'/,
+                                )?.[1] || "";
+                        }
+                    });
+                    haha = await solveSearchChallenge(a, b, c);
+                    await new Promise((r) => setTimeout(r, 3000));
+                    resp = await fetchWithAppliance(
+                        "https://www.linovelib.com/S6/",
+                        FetchType.POST,
+                        `searchkey=${encodeURIComponent(keyword)}`,
+                        { haha },
+                    );
+                    $ = load(resp);
+                    if ($("#challenge-running").length === 0) {
+                        setCache("haha", haha);
+                    }
+                }
+                return resp;
+            });
+            let $ = load(fp);
+            if ($("div.book-html-box").length > 0) {
                 const results: { name: string; path: string; cover: string }[] =
                     [
                         {
-                            name: $1("h1.book-name").text().trim(),
-                            path: page.url().replace(homeUrl, ""),
-                            cover: $1("div.book-img img").attr("src") || "",
+                            name: $("h1.book-name").text().trim(),
+                            path: $("meta[name=url]").attr("content")?.replace("https://www.linovelib.com", "") || "",
+                            cover: $("div.book-img img").attr("src") || "",
                         },
                     ];
                 addToNovelsCache(keyword, results);
                 return res.json({ results });
             }
             const pages =
-                $1("em#pagestats")
+                $("em#pagestats")
                     .text()
                     .match(/1\/(\d+)/)?.[1] || "1";
             const results: { name: string; path: string; cover: string }[] = [];
-            $1("div.search-html-box div.search-result-list").each((_, el) => {
-                const el$ = $1(el);
+            $("div.search-html-box div.search-result-list").each((_, el) => {
+                const el$ = $(el);
                 const name = el$.find("h2").text().trim();
                 const path = el$.find("h2 a").attr("href") || "";
                 const cover = el$.find("img").attr("src") || "";
                 results.push({ name, path, cover });
             });
             if (Number(pages) > 1) {
-                let currentPageHtml = searchResultsFPHtml;
+                let currentPageHtml = fp;
                 while (true) {
                     const $2 = load(currentPageHtml);
-                    if ($2("a.next").length > 0) {
-                        await Promise.all([
-                            page.click("a.next"),
-                            page.waitForNavigation({
-                                waitUntil: "networkidle2",
-                            }),
-                        ]);
+                    if ($("a.next").length > 0) {
+                        currentPageHtml = await fetchWithAppliance(
+                            `https://www.linovelib.com${$2("a.next").attr("href")}`,
+                        )
                     }
-                    currentPageHtml = await page.content();
                     const $3 = load(currentPageHtml);
-                    $2("div.search-html-box div.search-result-list").each(
+                    $3("div.search-html-box div.search-result-list").each(
                         (_, el) => {
                             const el$ = $3(el);
                             const name = el$.find("h2").text().trim();
@@ -294,6 +330,78 @@ async function main() {
             console.error("Error performing search:", e);
             res.status(500).json({ error: "Failed to perform search" });
         }
+        // try {
+        //     const homeUrl = `https://www.linovelib.com`;
+        //     const browser = await getPuppeteerBrowser();
+        //     const page =
+        //         (await browser.pages())[0] || (await browser.newPage());
+        //     await page.goto(homeUrl, { waitUntil: "networkidle2" });
+        //     await page.type("input[name='searchkey']", keyword);
+        //     await new Promise((r) => setTimeout(r, 700));
+        //     await page.keyboard.press("Enter");
+        //     await new Promise((r) => setTimeout(r, 1000));
+        //     await page.waitForSelector("div.head-fixed");
+        //     const searchResultsFPHtml = await page.content();
+        //     const $1 = load(searchResultsFPHtml);
+        //     if ($1("div.book-html-box").length > 0) {
+        //         const results: { name: string; path: string; cover: string }[] =
+        //             [
+        //                 {
+        //                     name: $1("h1.book-name").text().trim(),
+        //                     path: page.url().replace(homeUrl, ""),
+        //                     cover: $1("div.book-img img").attr("src") || "",
+        //                 },
+        //             ];
+        //         addToNovelsCache(keyword, results);
+        //         return res.json({ results });
+        //     }
+        //     const pages =
+        //         $1("em#pagestats")
+        //             .text()
+        //             .match(/1\/(\d+)/)?.[1] || "1";
+        //     const results: { name: string; path: string; cover: string }[] = [];
+        //     $1("div.search-html-box div.search-result-list").each((_, el) => {
+        //         const el$ = $1(el);
+        //         const name = el$.find("h2").text().trim();
+        //         const path = el$.find("h2 a").attr("href") || "";
+        //         const cover = el$.find("img").attr("src") || "";
+        //         results.push({ name, path, cover });
+        //     });
+        //     if (Number(pages) > 1) {
+        //         let currentPageHtml = searchResultsFPHtml;
+        //         while (true) {
+        //             const $2 = load(currentPageHtml);
+        //             if ($2("a.next").length > 0) {
+        //                 await Promise.all([
+        //                     page.click("a.next"),
+        //                     page.waitForNavigation({
+        //                         waitUntil: "networkidle2",
+        //                     }),
+        //                 ]);
+        //             }
+        //             currentPageHtml = await page.content();
+        //             const $3 = load(currentPageHtml);
+        //             $2("div.search-html-box div.search-result-list").each(
+        //                 (_, el) => {
+        //                     const el$ = $3(el);
+        //                     const name = el$.find("h2").text().trim();
+        //                     const path = el$.find("h2 a").attr("href") || "";
+        //                     const cover = el$.find("img").attr("src") || "";
+        //                     results.push({ name, path, cover });
+        //                 },
+        //             );
+        //             if ($3("a.next").length === 0) break;
+        //         }
+        //     }
+        //     if (results.length === 0) {
+        //         throw new Error("Parser Error!");
+        //     }
+        //     addToNovelsCache(keyword, results);
+        //     res.json({ results });
+        // } catch (e) {
+        //     console.error("Error performing search:", e);
+        //     res.status(500).json({ error: "Failed to perform search" });
+        // }
     });
 
     app.use("/api", apiRouter);

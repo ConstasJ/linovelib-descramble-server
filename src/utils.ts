@@ -1,46 +1,11 @@
+import { webcrypto } from "node:crypto";
 import { load } from "cheerio";
-import puppeteer, { Browser } from "puppeteer";
 
-export async function fetchHtml(
+export async function fetchText(
     url: string,
-    retryTimes: number = 10,
+    cookies?: Record<string, string>,
 ): Promise<string> {
-    let html = "";
-    try {
-        const requestInit: RequestInit = {
-            method: "GET",
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
-                Accept: "*/*",
-                "Accept-Language": "*",
-                Referer: url,
-                Cookie: "night=0",
-            },
-        };
-        const response = await fetch(url, requestInit);
-        html = await response.text();
-    } catch (e) {
-        if (retryTimes <= 0) {
-            throw new Error(
-                `Failed to fetch ${url} after multiple attempts: ${e}`,
-            );
-        }
-        console.warn(
-            `Error fetching ${url}. Retries left: ${retryTimes}. Error: ${e}`,
-        );
-        return fetchHtml(url, retryTimes - 1);
-    }
-    // Handle potential Cloudflare protection
-    if (
-        html.includes("cloudflare") ||
-        html.includes("Attention Required!") ||
-        html.includes("cf-browser-verification") ||
-        html.includes("Just a moment")
-    ) {
-        html = await fetchWithFlareSolverr(url, FetchType.GET);
-    }
-    return html;
+    return await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
 }
 
 export function transformChapterName(name: string): string {
@@ -160,127 +125,134 @@ export function transformContent(content: string): string {
     return content.replace(/./g, (char) => contentTransDict[char] || char);
 }
 
-let flareSolverrSessionCreated = false;
-
-async function createflareSolverrSession() {
-    const url = process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            cmd: "sessions.create",
-            session: "LDS-Session",
-        }),
-    });
-    if (!res.ok) {
-        throw new Error(
-            `Failed to create Cloudflare Solverr session: ${res.status} ${res.statusText}`,
-        );
-    }
-    flareSolverrSessionCreated = true;
-}
-
 export enum FetchType {
     GET,
     POST,
 }
 
-export async function checkFlareSolverrSessionCreated() {
-    const url = process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            cmd: "sessions.list",
-        }),
-    });
-    const sessions: string[] = JSON.parse(await res.text()).sessions;
-    return sessions.includes("LDS-Session");
+export async function fetchChapterLogJs(url: string): Promise<string> {
+    let script = await fetchText(url);
+    if (script.startsWith("<!DOCTYPE html>") || script.startsWith("<html>")) {
+        const $ = load(script);
+        script = $("body pre").text();
+    }
+    return script;
 }
 
-export async function fetchWithFlareSolverr(
+export async function fetchWithAppliance(
     url: string,
     mode: FetchType = FetchType.GET,
     body?: string,
+    cookies?: Record<string, string>,
 ): Promise<string> {
+    const applianceUrl =
+        process.env.APPLIANCE_URL || "http://localhost:5302/request";
     try {
-        const flareSolverrUrl =
-            process.env.FLARESOLVERR_URL || "http://localhost:8191/v1";
-        if (!flareSolverrSessionCreated) {
-            const sessionCreated = checkFlareSolverrSessionCreated();
-            if (!sessionCreated) {
-                await createflareSolverrSession();
-            } else {
-                flareSolverrSessionCreated = true;
-            }
-        }
         let res: Response | null = null;
         switch (mode) {
             case FetchType.GET:
-                res = await fetch(flareSolverrUrl, {
+                res = await fetch(applianceUrl, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
-                        cmd: "request.get",
                         url,
-                        session: "LDS-Session",
-                        maxTimeout: 60000,
+                        method: "GET",
+                        cookies,
                     }),
                 });
                 break;
             case FetchType.POST:
-                res = await fetch(flareSolverrUrl, {
+                res = await fetch(applianceUrl, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({
-                        cmd: "request.post",
                         url,
-                        session: "LDS-Session",
-                        maxTimeout: 60000,
-                        postData: body,
+                        method: "POST",
+                        data: body,
+                        cookies,
                     }),
                 });
                 break;
         }
         if (!res.status || res.status !== 200) {
             throw new Error(
-                `Failed to fetch via Cloudflare Solverr: ${res.status} ${res.statusText}`,
+                `Failed to fetch via Appliance: ${res.status} ${res.statusText}`,
             );
         }
         const data = await res.json();
-        return data.solution.response;
-    } catch (error) {
-        throw new Error(`Error in fetchWithFlareSolverr: ${error}`);
+        return data.content;
+    } catch (e) {
+        throw new Error(`Error in fetchWithAppliance: ${e}`);
     }
 }
 
-let puppeteerBrowser: Browser | null = null;
-
-export async function getPuppeteerBrowser(): Promise<Browser> {
-    if (puppeteerBrowser) {
-        return puppeteerBrowser;
-    } else {
-        puppeteerBrowser = await puppeteer.launch({
-            headless: process.env.NODE_ENV !== "development",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
-        return puppeteerBrowser;
+function k(e: string): Uint8Array<ArrayBuffer> {
+  // 标准 Base64 映射表
+  const t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  
+  // 1. 过滤掉所有不在映射表中的字符 (对应原代码的正则)
+  const n = e.replace(/[^A-Za-z0-9+/]/g, "");
+  const r = n.length;
+  
+  // 2. 计算输出长度：每 4 个字符转为 3 个字节
+  // 注意：原代码通常不处理末尾填充，直接通过位移计算
+  const buf = new Uint8Array(Math.floor(r * 0.75));
+  let i = 0, // buf 指针
+      a = 0, // 累加器
+      s = 0, // 当前位深
+      c = 0; // 临时索引
+  for (let l = 0; l < r; l++) {
+    c = t.indexOf(n[l] || '');
+    if (c === -1) continue; // 安全检查
+    a = (a << 6) | c; // 每个 Base64 字符携带 6 位信息
+    s += 6;
+    if (s >= 8) {
+      s -= 8;
+      // 提取高 8 位存入字节数组
+      buf[i++] = (a >> s) & 255;
     }
+  }
+  // 关键：必须截取到实际写入的长度
+  // 并强制转换为 Uint8Array<ArrayBuffer>
+  return new Uint8Array(buf.buffer.slice(0, i)) as Uint8Array<ArrayBuffer>;
 }
 
-export async function fetchChapterLogJs(url: string): Promise<string> {
-    let script = await fetchHtml(url);
-    if (script.startsWith("<!DOCTYPE html>") || script.startsWith("<html>")) {
-        const $ = load(script);
-        script = $("body pre").text();
-    }
-    return script;
+export async function solveSearchChallenge(
+    a: string,
+    b: string,
+    c: string,
+): Promise<string> {
+  const subtle = webcrypto.subtle;
+  // 使用 as Uint8Array 明确告诉 TS 这是它需要的 BufferSource
+  const keyData = k(a);
+  const counterData = k(b);
+  const encryptedData = k(c);
+  try {
+    const cryptoKey = await subtle.importKey(
+      "raw",
+      keyData,
+      { name: "AES-CTR" },
+      false,
+      ["decrypt"]
+    );
+    const decryptedBuffer = await subtle.decrypt(
+      {
+        name: "AES-CTR",
+        counter: counterData,
+        length: 64
+      },
+      cryptoKey,
+      encryptedData
+    );
+    // decryptedBuffer 得到的是 ArrayBuffer，需要转回 Uint8Array 供 TextDecoder 使用
+    const decoder = new TextDecoder();
+    const plainText = decoder.decode(new Uint8Array(decryptedBuffer));
+    return encodeURIComponent(plainText);
+  } catch (error) {
+    throw new Error(`解密失败: ${error}`);
+  }
 }

@@ -4,7 +4,7 @@ import { parse } from "@babel/parser";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import { writeFile } from "fs/promises";
-import { fetchChapterLogJs, fetchHtml } from "./utils";
+import { fetchChapterLogJs, fetchText } from "./utils";
 import { getCache, setCache } from "./cache";
 
 export interface Coefficients {
