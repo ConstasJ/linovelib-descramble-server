@@ -14,26 +14,29 @@ export async function fetchText(
     cookies?: Record<string, string>,
 ): Promise<string> {
     return await pRetry(async () => {
-        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies)
-        const result = res.toLowerCase();
-        if (
-            result.startsWith("limit") ||
-            result.startsWith("attention") ||
-            result.includes("protect") ||
-            result.includes("restrict") ||
-            result.includes("just a moment")
-        ) {
+        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
+
+        const snippet = res.slice(0, 1024).toLowerCase();
+        
+        // const isBlocked = [
+        //     "limit", "attention", "protect", "restrict", "just a moment"
+        // ].some(keyword => snippet.includes(keyword));
+        const isBlocked = /(limit|attention|protect|restrict|just a moment)/.test(snippet);
+        if (isBlocked) {
+            // 可以在这里增加一个 log，记录到底是哪个词触发了拦截
             throw new AccessDeniedError(`Access limited detected for ${url}`);
         }
+        
         return res;
     }, {
         shouldRetry: (error) => error instanceof AccessDeniedError,
         onFailedAttempt: (ctx) => {
-            console.warn(`[fetchText] 第 ${ctx.attemptNumber} 次尝试获取 ${url} 失败: ${ctx.error.message}. 重试中...`);
+            // 指数级减少日志噪音
+            console.warn(`[fetchText] Attempt ${ctx.attemptNumber} failed. Retrying...`);
         },
-        minTimeout: 2000,
-        maxTimeout: 5000,
-        retries: 10,
+        minTimeout: 2000, 
+        maxTimeout: 8000, // 稍微拉开上限，增加随机性
+        retries: 3,      // 降低重试次数，防止长时间阻塞排队队列
         randomize: true,
     });
 }
