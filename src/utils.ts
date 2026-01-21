@@ -146,12 +146,12 @@ export async function fetchWithAppliance(
     cookies?: Record<string, string>,
 ): Promise<string> {
     const applianceUrl =
-        process.env.APPLIANCE_URL || "http://localhost:5302/request";
+        process.env.APPLIANCE_URL || "http://localhost:5302";
     try {
         let res: Response | null = null;
         switch (mode) {
             case FetchType.GET:
-                res = await fetch(applianceUrl, {
+                res = await fetch(`${applianceUrl}/request`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -164,7 +164,7 @@ export async function fetchWithAppliance(
                 });
                 break;
             case FetchType.POST:
-                res = await fetch(applianceUrl, {
+                res = await fetch(`${applianceUrl}/request`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
