@@ -32,6 +32,7 @@
     "express": "^5.2.1",
     "morgan": "^1.10.1",
     "p-queue": "^9.1.0",
+    "p-retry": "^7.1.1",
     "webcrack": "2.16.0-beta.1"
   }
 }

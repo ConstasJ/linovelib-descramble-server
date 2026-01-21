@@ -1,26 +1,41 @@
 import { webcrypto } from "node:crypto";
 import { load } from "cheerio";
+import pRetry from 'p-retry';
+
+class AccessDeniedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "AccessDeniedError";
+    }
+}
 
 export async function fetchText(
     url: string,
     cookies?: Record<string, string>,
 ): Promise<string> {
-    while (true) {
-        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
+    return await pRetry(async () => {
+        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies)
         const result = res.toLowerCase();
         if (
             result.startsWith("limit") ||
             result.startsWith("attention") ||
             result.includes("protect") ||
             result.includes("restrict") ||
-            result.includes("Just a moment")
+            result.includes("just a moment")
         ) {
-            console.warn(`Access limited detected for ${url}, retrying after 500ms delay...`);
-            await new Promise((r) => setTimeout(r, Math.random() * 3000 + 2000));
-        } else {
-            return res;
+            throw new AccessDeniedError(`Access limited detected for ${url}`);
         }
-    }
+        return res;
+    }, {
+        shouldRetry: (error) => error instanceof AccessDeniedError,
+        onFailedAttempt: (ctx) => {
+            console.warn(`[fetchText] 第 ${ctx.attemptNumber} 次尝试获取 ${url} 失败: ${ctx.error.message}. 重试中...`);
+        },
+        minTimeout: 2000,
+        maxTimeout: 5000,
+        retries: 10,
+        randomize: true,
+    });
 }
 
 export function transformChapterName(name: string): string {
