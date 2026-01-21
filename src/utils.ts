@@ -5,7 +5,22 @@ export async function fetchText(
     url: string,
     cookies?: Record<string, string>,
 ): Promise<string> {
-    return await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
+    while (true) {
+        const res = await fetchWithAppliance(url, FetchType.GET, undefined, cookies);
+        const result = res.toLowerCase();
+        if (
+            result.startsWith("limited") ||
+            result.startsWith("attention") ||
+            result.includes("protected") ||
+            result.includes("restricted") ||
+            result.includes("Just a moment")
+        ) {
+            console.warn(`Access limited detected for ${url}, retrying after 500ms delay...`);
+            await new Promise((r) => setTimeout(r, 500));
+            continue;
+        }
+        return res;
+    }
 }
 
 export function transformChapterName(name: string): string {

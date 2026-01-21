@@ -80,6 +80,7 @@ async function main() {
                     ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
+                await new Promise((r) => setTimeout(r, 500));
                 const nextPageHtml = await fetchText(
                     `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
                 );
@@ -180,6 +181,7 @@ async function main() {
                     }
 
                     if (lastChapNotIdentified) {
+                        await new Promise((r) => setTimeout(r, 200));
                         const html = await fetchText(
                             `https://www.linovelib.com${chapterPath}`,
                         );
