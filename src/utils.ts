@@ -45,9 +45,9 @@ export function fetchText(
                     `[fetchText] Attempt ${attemptNumber} failed. Retrying...`,
                 );
             },
-            minTimeout: 2000,
-            maxTimeout: 8000, // 稍微拉开上限，增加随机性
-            retries: 3, // 降低重试次数，防止长时间阻塞排队队列
+            minTimeout: 5000,
+            maxTimeout: 15000,
+            retries: 10,
             randomize: true,
         },
     );

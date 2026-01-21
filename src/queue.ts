@@ -1,6 +1,11 @@
 import PQueue from "p-queue";
 import { getCache, setCache } from "./cache";
-import { fetchText, FetchType, fetchWithAppliance, solveSearchChallenge } from "./utils";
+import {
+    fetchText,
+    FetchType,
+    fetchWithAppliance,
+    solveSearchChallenge,
+} from "./utils";
 import { load } from "cheerio";
 
 class SearchQueue {
@@ -97,7 +102,7 @@ class SearchQueue {
 
 class NovelChapterQueue {
     private queue: PQueue;
-    
+
     constructor() {
         this.queue = new PQueue({
             concurrency: 1,
@@ -114,7 +119,7 @@ class NovelChapterQueue {
 
     async fetchChapterPartContent(url: string): Promise<string> {
         return await this.queue.add(async () => {
-            const match = url.match(/\/novel\/(\d+)\/(\d+)(?:_(\d+))?\.html/)
+            const match = url.match(/\/novel\/(\d+)\/(\d+)(?:_(\d+))?\.html/);
             if (!match) {
                 throw new Error(`无效的章节Part URL: ${url}`);
             }
@@ -126,11 +131,13 @@ class NovelChapterQueue {
             } catch (e) {
                 throw new Error(`获取章节Part内容失败: ${e}`);
             } finally {
-                const delay = this.getRandomDelay(200, 1000);
-                console.log(`[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求完成，延时 ${delay}ms 后开始下一个请求。`);
+                const delay = this.getRandomDelay(500, 1200);
+                console.log(
+                    `[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求完成，延时 ${delay}ms 后开始下一个请求。`,
+                );
                 await this.sleep(delay);
             }
-        })
+        });
     }
 }
 
