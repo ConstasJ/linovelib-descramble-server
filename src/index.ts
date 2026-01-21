@@ -14,12 +14,12 @@ import { load } from "cheerio";
 import {
     addToNovelsCache,
     getCache,
-    getNovelContentFromCache,
+    getNovelContentFromStorage,
     loadCache,
     saveCache,
     searchNovelsInCache,
     setCache,
-    setNovelContentToCache,
+    setNovelContentToStorage,
 } from "./cache";
 import { novelChapterQueue, searchQueue } from "./queue";
 
@@ -75,7 +75,7 @@ async function main() {
             }
             const novelId = matches[1] || "0";
             const chapterId = matches[2] || "0";
-            const cache = getNovelContentFromCache(
+            const cache = getNovelContentFromStorage(
                 parseInt(novelId),
                 parseInt(chapterId),
             )
@@ -104,7 +104,7 @@ async function main() {
                         ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             }
             content = `<h2>${chapterName}</h2>\n` + transformContent(content);
-            setNovelContentToCache(
+            setNovelContentToStorage(
                 parseInt(novelId),
                 parseInt(chapterId) || 0,
                 content,

@@ -6,7 +6,32 @@ import {
     statSync,
     rmSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { zstdCompress as zc, zstdDecompress as zd } from "node:zlib";
+
+const zstdCompress = (data: Buffer): Promise<Buffer> => {
+    return new Promise((resolve, reject) => {
+        zc(data, (err, compressedData) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(compressedData);
+            }
+        });
+    });
+};
+
+const zstdDecompress = (data: Buffer): Promise<Buffer> => {
+    return new Promise((resolve, reject) => {
+        zd(data, (err, decompressedData) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(decompressedData);
+            }
+        });
+    });
+};
 
 const novelsCache: Array<NovelItem> = [];
 
@@ -55,27 +80,40 @@ export function searchNovelsInCache(query: string): NovelItem[] {
     }
 }
 
-const novelContentCache: Map<number, Map<number, string>> = new Map();
+const novelsCacheDir = `${dataDir}/novels`;
 
-export function getNovelContentFromCache(
+export async function getNovelContentFromStorage(
     novelId: number,
     chapterId: number,
-): string | undefined {
-    if (novelContentCache.has(novelId)) {
-        return novelContentCache.get(novelId)!.get(chapterId);
+): Promise<string | null> {
+    const novelCacheDir = `${novelsCacheDir}/${novelId}`;
+    if (!existsSync(novelCacheDir) || (await stat(novelCacheDir)).isDirectory() === false) {
+        return null;
     }
-    return undefined;
+    const chapterFilePath = `${novelCacheDir}/${chapterId}.zstd`;
+    if (!existsSync(chapterFilePath)) {
+        return null;
+    }
+    const compressedData = await readFile(chapterFilePath);
+    const decompressedData = await zstdDecompress(compressedData);
+    return new TextDecoder().decode(decompressedData);
 }
 
-export function setNovelContentToCache(
+export async function setNovelContentToStorage(
     novelId: number,
     chapterId: number,
     content: string,
-): void {
-    if (!novelContentCache.has(novelId)) {
-        novelContentCache.set(novelId, new Map());
+): Promise<void> {
+    const novelCacheDir = `${novelsCacheDir}/${novelId}`;
+    if (!existsSync(novelCacheDir)) {
+        await mkdir(novelCacheDir, { recursive: true });
+    } else if (existsSync(novelCacheDir) && !(await stat(novelCacheDir)).isDirectory()) {
+        await rm(novelCacheDir);
+        await mkdir(novelCacheDir, { recursive: true });
     }
-    novelContentCache.get(novelId)!.set(chapterId, content);
+    const chapterFilePath = `${novelCacheDir}/${chapterId}.zstd`;
+    const compressedData = await zstdCompress(Buffer.from(content, "utf-8"));
+    await writeFile(chapterFilePath, compressedData);
 }
 
 export function createDataDirIfNotExists() {
@@ -95,13 +133,6 @@ export function saveCache() {
         lastUpdate: Date.now(),
         novels: novelsCache,
         keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
-        novelContentCache: Array.from(novelContentCache).reduce(
-            (acc, [novelId, chapterMap]) => {
-                acc[novelId] = Object.fromEntries(chapterMap);
-                return acc;
-            },
-            {} as Record<number, Record<number, string>>,
-        ),
     };
     // merge generalCache into cacheData
     for (const [key, value] of generalCache.entries()) {
@@ -120,16 +151,6 @@ export async function loadCache(): Promise<void> {
             cacheData.keywordsToNovelsMap,
         )) {
             keywordsToNovelsMap.set(key, value as KTNMValue);
-        }
-        for (const [novelIdStr, chapterObj] of Object.entries(
-            cacheData.novelContentCache,
-        )) {
-            const novelId = parseInt(novelIdStr);
-            const chapterMap = new Map<number, string>();
-            for (const [chapterIdStr, content] of Object.entries(chapterObj as Record<string, string>)) {
-                chapterMap.set(parseInt(chapterIdStr), content as string);
-            }
-            novelContentCache.set(novelId, chapterMap);
         }
         // extract other entries into generalCache
         for (const [key, value] of Object.entries(cacheData)) {
