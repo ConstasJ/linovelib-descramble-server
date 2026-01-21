@@ -75,11 +75,11 @@ async function main() {
             }
             const novelId = matches[1] || "0";
             const chapterId = matches[2] || "0";
-            const cache = getNovelContentFromStorage(
+            const cache = await getNovelContentFromStorage(
                 parseInt(novelId),
                 parseInt(chapterId),
             )
-            if (cache) {
+            if (cache !== null) {
                 return res.json({ content: cache });
             }
             const firstPageHtml = await novelChapterQueue.fetchChapterPartContent(
