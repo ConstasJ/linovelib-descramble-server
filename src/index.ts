@@ -6,10 +6,12 @@ import { fetchText, transformChapterName, transformContent } from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
+    getChapterPathFromCache,
     getNovelContentFromStorage,
     loadCache,
     saveCache,
     searchNovelsInCache,
+    setChapterPathToCache,
     setNovelContentToStorage,
 } from "./cache";
 import { novelChapterQueue, searchQueue } from "./queue";
@@ -196,18 +198,25 @@ async function main() {
                     }
 
                     if (lastChapNotIdentified) {
-                        await new Promise((r) => setTimeout(r, 200));
-                        const html =
-                            await novelChapterQueue.fetchChapterPartContent(
-                                `https://www.linovelib.com${chapterPath}`,
-                            );
-                        const $temp = load(html);
-                        const lastChapterPath = $temp(
-                            "div.mlfy_page a:first",
-                        ).attr("href");
+                        let lastChapterPath =
+                            getChapterPathFromCache(lastChapterName);
+                        if (!lastChapterPath) {
+                            const html =
+                                await novelChapterQueue.fetchChapterPartContent(
+                                    `https://www.linovelib.com${chapterPath}`,
+                                );
+                            const $temp = load(html);
+                            lastChapterPath =
+                                $temp("div.mlfy_page a:first").attr("href") ||
+                                "";
+                        }
+                        setChapterPathToCache(
+                            lastChapterName,
+                            lastChapterPath,
+                        );
                         chapters.push({
                             name: `${volumeName} - ${lastChapterName}`,
-                            path: lastChapterPath || "",
+                            path: lastChapterPath,
                             releaseTime: null,
                         });
                         lastChapNotIdentified = false;
@@ -347,6 +356,16 @@ async function main() {
             process.exit(1);
         }
     }
+
+    apiRouter.post("/save", async (_, res) => {
+        try {
+            saveCache();
+            res.json({ status: "Cache saved successfully" });
+        } catch (e) {
+            console.error("Error saving cache:", e);
+            res.status(500).json({ error: "Failed to save cache" });
+        }
+    });
 
     ["SIGINT", "SIGTERM"].forEach((signal) => {
         process.on(signal, () => onExit(signal));

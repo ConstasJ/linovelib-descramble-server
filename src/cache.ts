@@ -116,6 +116,20 @@ export async function setNovelContentToStorage(
     await writeFile(chapterFilePath, compressedData);
 }
 
+const chapterNameToPathCache: Map<string, string> = new Map();
+
+export function getChapterPathFromCache(
+    name: string,
+): string | undefined {
+    return chapterNameToPathCache.get(name);
+}
+
+export function setChapterPathToCache(
+    name: string, path: string,
+): void {
+    chapterNameToPathCache.set(name, path);
+}
+
 export function createDataDirIfNotExists() {
     if (!existsSync(dataDir)) {
         mkdirSync(dataDir, { recursive: true });
@@ -133,9 +147,11 @@ export function saveCache() {
         lastUpdate: Date.now(),
         novels: novelsCache,
         keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
+        chapterNameToPathCache: Object.fromEntries(chapterNameToPathCache),
     };
     // merge generalCache into cacheData
     for (const [key, value] of generalCache.entries()) {
+        if (key in cacheData) continue;
         (cacheData as any)[key] = value;
     }
     writeFileSync(cacheFilePath, JSON.stringify(cacheData), "utf-8");
@@ -151,6 +167,11 @@ export async function loadCache(): Promise<void> {
             cacheData.keywordsToNovelsMap,
         )) {
             keywordsToNovelsMap.set(key, value as KTNMValue);
+        }
+        for (const [key, value] of Object.entries(
+            cacheData.chapterNameToPathCache,
+        )) {
+            chapterNameToPathCache.set(key, value as string);
         }
         // extract other entries into generalCache
         for (const [key, value] of Object.entries(cacheData)) {
