@@ -2,11 +2,7 @@ import express from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
-import {
-    fetchText,
-    transformChapterName,
-    transformContent,
-} from "./utils";
+import { fetchText, transformChapterName, transformContent } from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
@@ -195,13 +191,9 @@ async function main() {
                     let chapterPath = chapterEl.attr("href") || "";
 
                     if (chapterPath.includes("javascript:cid(0)")) {
-                        if (chapterName.includes("插图")) {
-                            lastChapNotIdentified = true;
-                            lastChapterName = chapterName;
-                            continue;
-                        } else {
-                            chapterPath = `/novel/${novelId}/${chapterId}.html`;
-                        }
+                        lastChapNotIdentified = true;
+                        lastChapterName = chapterName;
+                        continue;
                     }
 
                     if (lastChapNotIdentified) {
