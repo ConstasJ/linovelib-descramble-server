@@ -90,7 +90,7 @@ export async function getNovelContentFromStorage(
     if (!existsSync(novelCacheDir) || (await stat(novelCacheDir)).isDirectory() === false) {
         return null;
     }
-    const chapterFilePath = `${novelCacheDir}/${chapterId}.zstd`;
+    const chapterFilePath = `${novelCacheDir}/${chapterId}.zst`;
     if (!existsSync(chapterFilePath)) {
         return null;
     }
@@ -111,7 +111,7 @@ export async function setNovelContentToStorage(
         await rm(novelCacheDir);
         await mkdir(novelCacheDir, { recursive: true });
     }
-    const chapterFilePath = `${novelCacheDir}/${chapterId}.zstd`;
+    const chapterFilePath = `${novelCacheDir}/${chapterId}.zst`;
     const compressedData = await zstdCompress(Buffer.from(content, "utf-8"));
     await writeFile(chapterFilePath, compressedData);
 }
