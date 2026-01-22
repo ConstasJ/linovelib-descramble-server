@@ -53,13 +53,13 @@ export function modernCompression(options: CompressionOptions = {}): RequestHand
         return;
       }
       vary(res, 'Accept-Encoding');
+      res.setHeader('Content-Encoding', method);
+      res.removeHeader('Content-Length');
     });
 
     // 核心启动函数
     const startCompression = (chunk: any) => {
       started = true;
-      res.setHeader('Content-Encoding', method!);
-      res.removeHeader('Content-Length');
 
       switch (method) {
         case 'zstd':
