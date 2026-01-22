@@ -198,7 +198,7 @@ async function main() {
                     if (lastChapNotIdentified) {
                         await new Promise((r) => setTimeout(r, 200));
                         const html =
-                            await fetchText(
+                            await novelChapterQueue.fetchChapterPartContent(
                                 `https://www.linovelib.com${chapterPath}`,
                             );
                         const $temp = load(html);
