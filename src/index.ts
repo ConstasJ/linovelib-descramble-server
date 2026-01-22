@@ -32,7 +32,6 @@ async function main() {
     app.use(
         morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"),
     );
-    app.use(modernCompression());
 
     const apiRouter = express.Router();
 
@@ -199,7 +198,7 @@ async function main() {
                     if (lastChapNotIdentified) {
                         await new Promise((r) => setTimeout(r, 200));
                         const html =
-                            await novelChapterQueue.fetchChapterPartContent(
+                            await fetchText(
                                 `https://www.linovelib.com${chapterPath}`,
                             );
                         const $temp = load(html);
