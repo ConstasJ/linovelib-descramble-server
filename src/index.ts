@@ -29,6 +29,14 @@ async function main() {
 
     app.set("trust proxy", true);
     app.use(express.json());
+
+    morgan.token("date", function () {
+        var p = new Date()
+            .toString()
+            .replace(/[A-Z]{3}\+/, "+")
+            .split(/ /);
+        return p[2] + "/" + p[1] + "/" + p[3] + ":" + p[4] + " " + p[5];
+    });
     app.use(
         morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"),
     );
@@ -78,13 +86,14 @@ async function main() {
             const cache = await getNovelContentFromStorage(
                 parseInt(novelId),
                 parseInt(chapterId),
-            )
+            );
             if (cache !== null) {
                 return res.json({ content: cache });
             }
-            const firstPageHtml = await novelChapterQueue.fetchChapterPartContent(
-                `https://www.linovelib.com${path}`,
-            );
+            const firstPageHtml =
+                await novelChapterQueue.fetchChapterPartContent(
+                    `https://www.linovelib.com${path}`,
+                );
             let $ = load(firstPageHtml);
             const chapterName = $("h1").text().trim();
             let nextPageId =
@@ -93,9 +102,10 @@ async function main() {
                     ?.match(/\/novel\/(\d+)\/([\d_]+)\.html/)?.[2] || "";
             let content = await decrypt(firstPageHtml);
             while (nextPageId?.includes(chapterId)) {
-                const nextPageHtml = await novelChapterQueue.fetchChapterPartContent(
-                    `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
-                );
+                const nextPageHtml =
+                    await novelChapterQueue.fetchChapterPartContent(
+                        `https://www.linovelib.com/novel/${novelId}/${nextPageId}.html`,
+                    );
                 content += await decrypt(nextPageHtml);
                 $ = load(nextPageHtml);
                 nextPageId =
@@ -110,7 +120,7 @@ async function main() {
                 content,
             );
             res.json({
-                content
+                content,
             });
         } catch (e) {
             console.error("Error fetching chapter:", e);
@@ -133,9 +143,12 @@ async function main() {
                 const $container = $(".book-dec.Jbook-dec").clone();
                 $container.find(".notice").remove();
                 const paragraphs: string[] = [];
-                $container.find("p").not(".backupname").each((_, el) => {
-                    paragraphs.push($(el).text().trim());
-                });
+                $container
+                    .find("p")
+                    .not(".backupname")
+                    .each((_, el) => {
+                        paragraphs.push($(el).text().trim());
+                    });
                 return paragraphs.join("\n");
             })();
             const author = $("div.au-name a:first").text().trim();
@@ -196,9 +209,10 @@ async function main() {
 
                     if (lastChapNotIdentified) {
                         await new Promise((r) => setTimeout(r, 200));
-                        const html = await novelChapterQueue.fetchChapterPartContent(
-                            `https://www.linovelib.com${chapterPath}`,
-                        );
+                        const html =
+                            await novelChapterQueue.fetchChapterPartContent(
+                                `https://www.linovelib.com${chapterPath}`,
+                            );
                         const $temp = load(html);
                         const lastChapterPath = $temp(
                             "div.mlfy_page a:first",
@@ -251,7 +265,13 @@ async function main() {
                     [
                         {
                             name: $("h1.book-name").text().trim(),
-                            path: $("meta[name=url]").attr("content")?.replace("https://www.linovelib.com", "") || "",
+                            path:
+                                $("meta[name=url]")
+                                    .attr("content")
+                                    ?.replace(
+                                        "https://www.linovelib.com",
+                                        "",
+                                    ) || "",
                             cover: $("div.book-img img").attr("src") || "",
                         },
                     ];
@@ -277,7 +297,7 @@ async function main() {
                     if ($("a.next").length > 0) {
                         currentPageHtml = await fetchWithAppliance(
                             `https://www.linovelib.com${$2("a.next").attr("href")}`,
-                        )
+                        );
                     }
                     const $3 = load(currentPageHtml);
                     $3("div.search-html-box div.search-result-list").each(
