@@ -4,24 +4,20 @@ import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
 import {
     fetchText,
-    FetchType,
-    fetchWithAppliance,
-    solveSearchChallenge,
     transformChapterName,
     transformContent,
 } from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
-    getCache,
     getNovelContentFromStorage,
     loadCache,
     saveCache,
     searchNovelsInCache,
-    setCache,
     setNovelContentToStorage,
 } from "./cache";
 import { novelChapterQueue, searchQueue } from "./queue";
+import { modernCompression } from "./middleware";
 
 async function main() {
     await loadCache();
@@ -40,6 +36,7 @@ async function main() {
     app.use(
         morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"),
     );
+    app.use(modernCompression());
 
     const apiRouter = express.Router();
 
@@ -295,7 +292,7 @@ async function main() {
                 while (true) {
                     const $2 = load(currentPageHtml);
                     if ($("a.next").length > 0) {
-                        currentPageHtml = await fetchWithAppliance(
+                        currentPageHtml = await fetchText(
                             `https://www.linovelib.com${$2("a.next").attr("href")}`,
                         );
                     }
