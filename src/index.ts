@@ -19,17 +19,42 @@ import {
 import { novelChapterQueue, searchQueue } from "./queue";
 import { NovelItem } from "./types";
 
+const COVER_URL_PREFIX = "https://www.linovelib.com/files/article/image";
+
+/**
+ * 从封面原始 URL 中提取路径部分（去掉固定前缀和 query string）
+ * 例: https://www.linovelib.com/files/article/image/5/5080/5080s.jpg?272101 → /5/5080/5080s.jpg
+ */
+function extractCoverPath(originalUrl: string): string {
+    let path = originalUrl;
+    if (path.startsWith(COVER_URL_PREFIX)) {
+        path = path.slice(COVER_URL_PREFIX.length);
+    }
+    // 去掉 query string
+    const qIndex = path.indexOf("?");
+    if (qIndex !== -1) {
+        path = path.slice(0, qIndex);
+    }
+    return path;
+}
+
+/** 从封面代理路径还原为原始 URL */
+function restoreCoverUrl(coverPath: string): string {
+    return `${COVER_URL_PREFIX}${coverPath}`;
+}
+
 /** 预获取封面并将 cover URL 改写为本地代理地址 */
-function rewriteCoverUrls(results: NovelItem[]): void {
+function rewriteCoverUrls(results: NovelItem[], baseUrl: string): void {
     for (const r of results) {
         if (r.cover) {
             const originalCover = r.cover;
+            const coverPath = extractCoverPath(originalCover);
             fetchBinary(originalCover)
                 .then((res) =>
                     setCoverToCache(originalCover, res.data, res.contentType),
                 )
                 .catch((e) => console.error("封面预取失败:", e));
-            r.cover = `/api/cover?url=${encodeURIComponent(originalCover)}`;
+            r.cover = `${baseUrl}/api/cover${coverPath}`;
         }
     }
 }
@@ -140,22 +165,24 @@ async function main() {
         }
     });
 
-    apiRouter.get("/cover", async (req, res) => {
-        const url = (req.query.url as string) || "";
-        if (!url) {
-            return res.status(400).json({ error: "URL is required" });
+    apiRouter.get("/cover/*path", async (req, res) => {
+        // 从路径中提取封面路径，例如 /api/cover/5/5080/5080s.jpg → /5/5080/5080s.jpg
+        const coverPath = "/" + (req.params.path as string[]).join("/");
+        if (!coverPath) {
+            return res.status(400).json({ error: "Cover path is required" });
         }
+        const originalUrl = restoreCoverUrl(coverPath);
         try {
             // 先查缓存
-            const cached = await getCoverFromCache(url);
+            const cached = await getCoverFromCache(originalUrl);
             if (cached) {
                 res.set("Content-Type", cached.contentType);
                 res.set("Cache-Control", "public, max-age=86400");
                 return res.send(cached.data);
             }
             // 缓存未命中，通过 Appliance 获取
-            const { data, contentType } = await fetchBinary(url);
-            await setCoverToCache(url, data, contentType);
+            const { data, contentType } = await fetchBinary(originalUrl);
+            await setCoverToCache(originalUrl, data, contentType);
             res.set("Content-Type", contentType);
             res.set("Cache-Control", "public, max-age=86400");
             return res.send(data);
@@ -273,8 +300,9 @@ async function main() {
                 }
             }
             // 预获取封面并改写 URL
+            const baseUrl = `${req.protocol}://${req.get("host")}`;
             const localCover = cover
-                ? `/api/cover?url=${encodeURIComponent(cover)}`
+                ? `${baseUrl}/api/cover${extractCoverPath(cover)}`
                 : "";
             if (cover) {
                 fetchBinary(cover)
@@ -324,7 +352,8 @@ async function main() {
                             cover: $("div.book-img img").attr("src") || "",
                         },
                     ];
-                rewriteCoverUrls(results);
+                const baseUrl = `${req.protocol}://${req.get("host")}`;
+                rewriteCoverUrls(results, baseUrl);
                 addToNovelsCache(keyword, results);
                 return res.json({ results });
             }
@@ -365,7 +394,8 @@ async function main() {
             if (results.length === 0) {
                 throw new Error("Parser Error!");
             }
-            rewriteCoverUrls(results);
+            const baseUrl = `${req.protocol}://${req.get("host")}`;
+            rewriteCoverUrls(results, baseUrl);
             addToNovelsCache(keyword, results);
             res.json({ results });
         } catch (e) {
