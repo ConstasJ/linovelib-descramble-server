@@ -234,6 +234,68 @@ export async function fetchWithAppliance(
     }
 }
 
+export async function fetchBinary(
+    url: string,
+    cookies?: Record<string, string>,
+): Promise<{ data: Buffer; contentType: string }> {
+    const applianceUrl = process.env.APPLIANCE_URL || "http://localhost:5302";
+    return pRetry(
+        async () => {
+            const res = await fetch(`${applianceUrl}/request-binary`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    url,
+                    method: "GET",
+                    cookies,
+                }),
+            });
+            if (!res.ok) {
+                throw new Error(
+                    `Failed to fetch binary via Appliance: ${res.status} ${res.statusText}`,
+                );
+            }
+            const contentType =
+                res.headers.get("x-original-content-type") ||
+                res.headers.get("content-type") ||
+                "application/octet-stream";
+            const arrayBuffer = await res.arrayBuffer();
+            const data = Buffer.from(arrayBuffer);
+            // 检查是否返回了 HTML（可能是 CF 拦截页面）
+            if (
+                contentType.includes("text/html") ||
+                data.length < 100
+            ) {
+                const snippet = data.toString("utf-8").slice(0, 512).toLowerCase();
+                if (
+                    /(limit|attention|protect|restrict|just a moment)/.test(
+                        snippet,
+                    )
+                ) {
+                    throw new AccessDeniedError(
+                        `Access limited detected for binary ${url}`,
+                    );
+                }
+            }
+            return { data, contentType };
+        },
+        {
+            shouldRetry: ({ error }) => error instanceof AccessDeniedError,
+            onFailedAttempt: ({ attemptNumber }) => {
+                console.warn(
+                    `[fetchBinary] Attempt ${attemptNumber} failed. Retrying...`,
+                );
+            },
+            minTimeout: 5000,
+            maxTimeout: 15000,
+            retries: 5,
+            randomize: true,
+        },
+    );
+}
+
 function k(e: string): Uint8Array<ArrayBuffer> {
     // 标准 Base64 映射表
     const t =

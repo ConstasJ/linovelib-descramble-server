@@ -1,4 +1,5 @@
 import { NovelItem } from "./types";
+import { createHash } from "node:crypto";
 import {
     existsSync,
     writeFileSync,
@@ -140,6 +141,63 @@ export function createDataDirIfNotExists() {
     }
 }
 
+// ========== 封面缓存系统 ==========
+
+const coversCacheDir = `${dataDir}/covers`;
+
+type CoverMeta = {
+    contentType: string;
+    originalUrl: string;
+    ext: string;
+};
+
+const coverMetadataMap: Map<string, CoverMeta> = new Map();
+
+function getCoverHash(url: string): string {
+    return createHash("md5").update(url).digest("hex");
+}
+
+function getExtFromContentType(contentType: string): string {
+    if (contentType.includes("jpeg") || contentType.includes("jpg"))
+        return "jpg";
+    if (contentType.includes("png")) return "png";
+    if (contentType.includes("gif")) return "gif";
+    if (contentType.includes("webp")) return "webp";
+    if (contentType.includes("avif")) return "avif";
+    return "bin";
+}
+
+export async function getCoverFromCache(
+    url: string,
+): Promise<{ data: Buffer; contentType: string } | null> {
+    const hash = getCoverHash(url);
+    const meta = coverMetadataMap.get(hash);
+    if (!meta) return null;
+    const filePath = `${coversCacheDir}/${hash}.${meta.ext}`;
+    if (!existsSync(filePath)) return null;
+    const data = await readFile(filePath);
+    return { data, contentType: meta.contentType };
+}
+
+export async function setCoverToCache(
+    url: string,
+    data: Buffer,
+    contentType: string,
+): Promise<void> {
+    const hash = getCoverHash(url);
+    const ext = getExtFromContentType(contentType);
+    if (!existsSync(coversCacheDir)) {
+        await mkdir(coversCacheDir, { recursive: true });
+    }
+    const filePath = `${coversCacheDir}/${hash}.${ext}`;
+    await writeFile(filePath, data);
+    coverMetadataMap.set(hash, {
+        contentType,
+        originalUrl: url,
+        ext,
+    });
+}
+
 export function saveCache() {
     createDataDirIfNotExists();
     const cacheFilePath = `${dataDir}/cache.json`;
@@ -148,6 +206,7 @@ export function saveCache() {
         novels: novelsCache,
         keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
         chapterNameToPathCache: Object.fromEntries(chapterNameToPathCache),
+        coverMetadata: Object.fromEntries(coverMetadataMap),
     };
     // merge generalCache into cacheData
     for (const [key, value] of generalCache.entries()) {
@@ -172,6 +231,14 @@ export async function loadCache(): Promise<void> {
             cacheData.chapterNameToPathCache,
         )) {
             chapterNameToPathCache.set(key, value as string);
+        }
+        // 恢复封面元数据
+        if (cacheData.coverMetadata) {
+            for (const [key, value] of Object.entries(
+                cacheData.coverMetadata,
+            )) {
+                coverMetadataMap.set(key, value as CoverMeta);
+            }
         }
         // extract other entries into generalCache
         for (const [key, value] of Object.entries(cacheData)) {

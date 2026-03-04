@@ -2,19 +2,38 @@ import express from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
-import { fetchText, transformChapterName, transformContent } from "./utils";
+import { fetchBinary, fetchText, transformChapterName, transformContent } from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
     getChapterPathFromCache,
+    getCoverFromCache,
     getNovelContentFromStorage,
     loadCache,
     saveCache,
     searchNovelsInCache,
+    setCoverToCache,
     setChapterPathToCache,
     setNovelContentToStorage,
 } from "./cache";
 import { novelChapterQueue, searchQueue } from "./queue";
+import { NovelItem } from "./types";
+
+/** 预获取封面并将 cover URL 改写为本地代理地址 */
+function rewriteCoverUrls(results: NovelItem[]): void {
+    for (const r of results) {
+        if (r.cover) {
+            const originalCover = r.cover;
+            fetchBinary(originalCover)
+                .then((res) =>
+                    setCoverToCache(originalCover, res.data, res.contentType),
+                )
+                .catch((e) => console.error("封面预取失败:", e));
+            r.cover = `/api/cover?url=${encodeURIComponent(originalCover)}`;
+        }
+    }
+}
+
 
 async function main() {
     await loadCache();
@@ -121,6 +140,31 @@ async function main() {
         }
     });
 
+    apiRouter.get("/cover", async (req, res) => {
+        const url = (req.query.url as string) || "";
+        if (!url) {
+            return res.status(400).json({ error: "URL is required" });
+        }
+        try {
+            // 先查缓存
+            const cached = await getCoverFromCache(url);
+            if (cached) {
+                res.set("Content-Type", cached.contentType);
+                res.set("Cache-Control", "public, max-age=86400");
+                return res.send(cached.data);
+            }
+            // 缓存未命中，通过 Appliance 获取
+            const { data, contentType } = await fetchBinary(url);
+            await setCoverToCache(url, data, contentType);
+            res.set("Content-Type", contentType);
+            res.set("Cache-Control", "public, max-age=86400");
+            return res.send(data);
+        } catch (e) {
+            console.error("获取封面失败:", e);
+            res.status(500).json({ error: "Failed to fetch cover" });
+        }
+    });
+
     apiRouter.get("/novel", async (req, res) => {
         const path = (req.query.path as string) || "";
         if (!path) {
@@ -131,7 +175,7 @@ async function main() {
             const html = await fetchText(url);
             const $ = load(html);
             const name = $("h1.book-name").text().trim();
-            const cover = $("div.book-img img").attr("src") || "";
+            const cover = $(".book-img img").attr("src") || "";
             const summary = (() => {
                 const $container = $(".book-dec.Jbook-dec").clone();
                 $container.find(".notice").remove();
@@ -228,10 +272,19 @@ async function main() {
                     });
                 }
             }
+            // 预获取封面并改写 URL
+            const localCover = cover
+                ? `/api/cover?url=${encodeURIComponent(cover)}`
+                : "";
+            if (cover) {
+                fetchBinary(cover)
+                    .then((r) => setCoverToCache(cover, r.data, r.contentType))
+                    .catch((e) => console.error("封面预取失败:", e));
+            }
             res.json({
                 name,
                 path,
-                cover,
+                cover: localCover,
                 summary,
                 author,
                 status,
@@ -257,7 +310,7 @@ async function main() {
             const fp = await searchQueue.performFirstSearch(keyword);
             const $ = load(fp);
             if ($("div.book-html-box").length > 0) {
-                const results: { name: string; path: string; cover: string }[] =
+                const results: NovelItem[] =
                     [
                         {
                             name: $("h1.book-name").text().trim(),
@@ -271,6 +324,7 @@ async function main() {
                             cover: $("div.book-img img").attr("src") || "",
                         },
                     ];
+                rewriteCoverUrls(results);
                 addToNovelsCache(keyword, results);
                 return res.json({ results });
             }
@@ -278,7 +332,7 @@ async function main() {
                 $("em#pagestats")
                     .text()
                     .match(/1\/(\d+)/)?.[1] || "1";
-            const results: { name: string; path: string; cover: string }[] = [];
+            const results: NovelItem[] = [];
             $("div.search-html-box div.search-result-list").each((_, el) => {
                 const el$ = $(el);
                 const name = el$.find("h2").text().trim();
@@ -290,7 +344,7 @@ async function main() {
                 let currentPageHtml = fp;
                 while (true) {
                     const $2 = load(currentPageHtml);
-                    if ($("a.next").length > 0) {
+                    if ($2("a.next").length > 0) {
                         currentPageHtml = await fetchText(
                             `https://www.linovelib.com${$2("a.next").attr("href")}`,
                         );
@@ -311,6 +365,7 @@ async function main() {
             if (results.length === 0) {
                 throw new Error("Parser Error!");
             }
+            rewriteCoverUrls(results);
             addToNovelsCache(keyword, results);
             res.json({ results });
         } catch (e) {
