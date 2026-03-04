@@ -6,6 +6,7 @@ import * as t from "@babel/types";
 import { writeFile } from "fs/promises";
 import { fetchChapterLogJs } from "./utils";
 import { getCache, setCache } from "./cache";
+import { detectObfuscation } from "./detector";
 
 export interface Coefficients {
     seedMultiplier: number;
@@ -16,20 +17,29 @@ export interface Coefficients {
 }
 
 function getObfuscatedPart(fullCode: string): string {
-    const match = fullCode.match(/function\s+_0x/);
+    const match = fullCode.match(/\/\/}/);
     if (!match || match.index == null)
         throw new Error("Obfuscated part not found");
-    return fullCode.slice(match.index);
+    return fullCode.slice(match.index + 4);
+}
+
+async function deobfNested(code: string): Promise<string> {
+    let codeToDeobf = code;
+    while (true) {
+        const deobfCode = (await webcrack(codeToDeobf)).code;
+        const detectionResult = detectObfuscation(deobfCode);
+        if (detectionResult.detected) {
+            codeToDeobf = deobfCode;
+        } else {
+            return deobfCode;
+        }
+    }
 }
 
 async function extractCoefficients(scriptUrl: string) {
     const scriptContent = await fetchChapterLogJs(scriptUrl);
     const obfCode = getObfuscatedPart(scriptContent);
-    const deobfCode = (
-        await webcrack(obfCode, {
-            mangle: true,
-        })
-    ).code;
+    const deobfCode = await deobfNested(obfCode);
     await writeFile("deobfuscated.js", deobfCode, "utf-8");
     const ast = parse(deobfCode, { sourceType: "module", plugins: ["jsx"] });
     const coefficients: Partial<Coefficients> = {};
