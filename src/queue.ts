@@ -25,9 +25,9 @@ interface BackoffConfig {
 }
 
 const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
-    initialBaseDelay: 1000,
-    minDelay: 300,
-    maxDelay: 30000,
+    initialBaseDelay: 700,
+    minDelay: 50,
+    maxDelay: 10000,
     windowSize: 10,
     speedUpThreshold: 0.9,
     stableThreshold: 0.7,
