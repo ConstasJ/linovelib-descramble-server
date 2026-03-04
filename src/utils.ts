@@ -1,8 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { load } from "cheerio";
-import pRetry from "p-retry";
 
-class AccessDeniedError extends Error {
+export class AccessDeniedError extends Error {
     constructor(message: string) {
         super(message);
         this.name = "AccessDeniedError";
@@ -13,44 +12,26 @@ export function fetchText(
     url: string,
     cookies?: Record<string, string>,
 ): Promise<string> {
-    return pRetry(
-        async () => {
-            const res = await fetchWithAppliance(
-                url,
-                FetchType.GET,
-                undefined,
-                cookies,
+    return fetchWithAppliance(
+        url,
+        FetchType.GET,
+        undefined,
+        cookies,
+    ).then((res) => {
+        const snippet = res.slice(0, 1024).toLowerCase();
+
+        const isBlocked =
+            /(limit|attention|protect|restrict|just a moment)/.test(
+                snippet,
             );
+        if (isBlocked) {
+            throw new AccessDeniedError(
+                `Access limited detected for ${url}`,
+            );
+        }
 
-            const snippet = res.slice(0, 1024).toLowerCase();
-
-            const isBlocked =
-                /(limit|attention|protect|restrict|just a moment)/.test(
-                    snippet,
-                );
-            if (isBlocked) {
-                // 可以在这里增加一个 log，记录到底是哪个词触发了拦截
-                throw new AccessDeniedError(
-                    `Access limited detected for ${url}`,
-                );
-            }
-
-            return res;
-        },
-        {
-            shouldRetry: ({ error }) => error instanceof AccessDeniedError,
-            onFailedAttempt: ({ attemptNumber }) => {
-                // 指数级减少日志噪音
-                console.warn(
-                    `[fetchText] Attempt ${attemptNumber} failed. Retrying...`,
-                );
-            },
-            minTimeout: 5000,
-            maxTimeout: 15000,
-            retries: 10,
-            randomize: true,
-        },
-    );
+        return res;
+    });
 }
 
 export function transformChapterName(name: string): string {
@@ -239,61 +220,45 @@ export async function fetchBinary(
     cookies?: Record<string, string>,
 ): Promise<{ data: Buffer; contentType: string }> {
     const applianceUrl = process.env.APPLIANCE_URL || "http://localhost:5302";
-    return pRetry(
-        async () => {
-            const res = await fetch(`${applianceUrl}/request-binary`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    url,
-                    method: "GET",
-                    cookies,
-                }),
-            });
-            if (!res.ok) {
-                throw new Error(
-                    `Failed to fetch binary via Appliance: ${res.status} ${res.statusText}`,
-                );
-            }
-            const contentType =
-                res.headers.get("x-original-content-type") ||
-                res.headers.get("content-type") ||
-                "application/octet-stream";
-            const arrayBuffer = await res.arrayBuffer();
-            const data = Buffer.from(arrayBuffer);
-            // 检查是否返回了 HTML（可能是 CF 拦截页面）
-            if (
-                contentType.includes("text/html") ||
-                data.length < 100
-            ) {
-                const snippet = data.toString("utf-8").slice(0, 512).toLowerCase();
-                if (
-                    /(limit|attention|protect|restrict|just a moment)/.test(
-                        snippet,
-                    )
-                ) {
-                    throw new AccessDeniedError(
-                        `Access limited detected for binary ${url}`,
-                    );
-                }
-            }
-            return { data, contentType };
+    const res = await fetch(`${applianceUrl}/request-binary`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
         },
-        {
-            shouldRetry: ({ error }) => error instanceof AccessDeniedError,
-            onFailedAttempt: ({ attemptNumber }) => {
-                console.warn(
-                    `[fetchBinary] Attempt ${attemptNumber} failed. Retrying...`,
-                );
-            },
-            minTimeout: 5000,
-            maxTimeout: 15000,
-            retries: 5,
-            randomize: true,
-        },
-    );
+        body: JSON.stringify({
+            url,
+            method: "GET",
+            cookies,
+        }),
+    });
+    if (!res.ok) {
+        throw new Error(
+            `Failed to fetch binary via Appliance: ${res.status} ${res.statusText}`,
+        );
+    }
+    const contentType =
+        res.headers.get("x-original-content-type") ||
+        res.headers.get("content-type") ||
+        "application/octet-stream";
+    const arrayBuffer = await res.arrayBuffer();
+    const data = Buffer.from(arrayBuffer);
+    // 检查是否返回了 HTML（可能是 CF 拦截页面）
+    if (
+        contentType.includes("text/html") ||
+        data.length < 100
+    ) {
+        const snippet = data.toString("utf-8").slice(0, 512).toLowerCase();
+        if (
+            /(limit|attention|protect|restrict|just a moment)/.test(
+                snippet,
+            )
+        ) {
+            throw new AccessDeniedError(
+                `Access limited detected for binary ${url}`,
+            );
+        }
+    }
+    return { data, contentType };
 }
 
 function k(e: string): Uint8Array<ArrayBuffer> {

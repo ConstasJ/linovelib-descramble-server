@@ -5,6 +5,7 @@ import {
     FetchType,
     fetchWithAppliance,
     solveSearchChallenge,
+    AccessDeniedError,
 } from "./utils";
 import { load } from "cheerio";
 
@@ -285,40 +286,75 @@ class NovelChapterQueue {
             const novelId = match[1];
             const chapterId = match[2];
             const partId = match[3] || "1";
-            try {
-                const content = await fetchText(url);
-                this.backoff.recordOutcome(true); // Record success
-                return content;
-            } catch (e) {
-                // Detect Cloudflare WAF blocking
-                const isCFBlock = this.isCloudflareBlock(e);
-                
-                // Record failure for backoff adjustment
-                this.backoff.recordOutcome(false);
-                
-                // Log with different messages for CF blocks vs other errors
-                if (isCFBlock) {
-                    console.warn(
-                        `[ChapterQueue] 检测到Cloudflare防护触发: ${(e as Error).message}`,
-                    );
-                } else {
-                    console.error(
-                        `[ChapterQueue] 获取章节Part内容失败: ${(e as Error).message}`,
-                    );
-                }
 
-                throw new Error(`获取章节Part内容失败: ${e}`);
-            } finally {
-                const delay = this.backoff.getNextDelay();
-                const successRate = this.backoff.getSuccessWindowRate();
-                const baseDelay = this.backoff.getCurrentBaseDelay();
-                console.log(
-                    `[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求完成，延时 ${delay}ms (成功率: ${successRate.toFixed(2)}, 基础延时: ${baseDelay}ms)`,
-                );
-                await this.sleep(delay);
+            const maxRetries = 10;
+            let lastError: Error | null = null;
+
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const content = await fetchText(url);
+                    this.backoff.recordOutcome(true); // Record success
+
+                    // Log successful request
+                    const delay = this.backoff.getNextDelay();
+                    const successRate = this.backoff.getSuccessWindowRate();
+                    const baseDelay = this.backoff.getCurrentBaseDelay();
+                    console.log(
+                        `[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求成功，延时 ${delay}ms (成功率: ${successRate.toFixed(2)}, 基础延时: ${baseDelay}ms)`,
+                    );
+                    await this.sleep(delay);
+
+                    return content;
+                } catch (e) {
+                    lastError = e as Error;
+                    const isCFBlock = this.isCloudflareBlock(e);
+
+                    // Record failure for backoff adjustment
+                    this.backoff.recordOutcome(false);
+
+                    // Check if we should retry
+                    const shouldRetry = 
+                        (isCFBlock || e instanceof AccessDeniedError) && 
+                        attempt < maxRetries;
+
+                    if (shouldRetry) {
+                        // Get adaptive delay for retry
+                        const retryDelay = this.backoff.getNextDelay();
+                        const successRate = this.backoff.getSuccessWindowRate();
+                        const baseDelay = this.backoff.getCurrentBaseDelay();
+
+                        console.warn(
+                            `[ChapterQueue] 检测到访问限制 (尝试 ${attempt}/${maxRetries})，延时 ${retryDelay}ms 后重试 (成功率: ${successRate.toFixed(2)}, 基础延时: ${baseDelay}ms)`,
+                        );
+
+                        await this.sleep(retryDelay);
+                        continue; // Retry
+                    } else {
+                        // Non-retryable error or max retries reached
+                        if (isCFBlock || e instanceof AccessDeniedError) {
+                            console.error(
+                                `[ChapterQueue] Cloudflare防护触发，已达最大重试次数 (${maxRetries})`,
+                            );
+                        } else {
+                            console.error(
+                                `[ChapterQueue] 获取章节Part内容失败: ${lastError.message}`,
+                            );
+                        }
+
+                        // Still apply delay before next request in queue
+                        const delay = this.backoff.getNextDelay();
+                        await this.sleep(delay);
+
+                        throw new Error(`获取章节Part内容失败: ${lastError.message}`);
+                    }
+                }
             }
+
+            // Should never reach here, but TypeScript needs it
+            throw lastError!;
         });
     }
+
 }
 
 // 导出单例，确保全站共用同一个限流器
