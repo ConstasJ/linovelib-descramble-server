@@ -15,7 +15,6 @@ import {
     setNovelContentToStorage,
 } from "./cache";
 import { novelChapterQueue, searchQueue } from "./queue";
-import { modernCompression } from "./middleware";
 
 async function main() {
     await loadCache();
