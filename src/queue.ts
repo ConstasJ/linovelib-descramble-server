@@ -26,14 +26,14 @@ interface BackoffConfig {
 }
 
 const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
-    initialBaseDelay: 700,
-    minDelay: 50,
+    initialBaseDelay: 1000,
+    minDelay: 500,
     maxDelay: 10000,
     windowSize: 10,
     speedUpThreshold: 0.9,
     stableThreshold: 0.7,
     slowdownThreshold: 0.5,
-    decayFactor: 0.8,
+    decayFactor: 0.5,
     moderateIncrease: 1.5,
     aggressiveIncrease: 2.0,
 };
@@ -287,7 +287,7 @@ class NovelChapterQueue {
             const chapterId = match[2];
             const partId = match[3] || "1";
 
-            const maxRetries = 10;
+            const maxRetries = 1000;
             let lastError: Error | null = null;
 
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
