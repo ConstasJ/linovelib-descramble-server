@@ -23,8 +23,9 @@ interface BackoffConfig {
     decayFactor: number;       // Multiplier when speeding up (0.8)
     moderateIncrease: number;  // Multiplier for moderate slowdown (1.5)
     aggressiveIncrease: number;// Multiplier for aggressive slowdown (2.0)
+    jitterFactor: number;      // Jitter randomization factor (0.3 = ±30%)
+    bufferZone: number;        // Buffer zone to preserve jitter space (ms)
 }
-
 const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
     initialBaseDelay: 1000,
     minDelay: 500,
@@ -36,8 +37,9 @@ const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
     decayFactor: 0.5,
     moderateIncrease: 1.5,
     aggressiveIncrease: 2.0,
+    jitterFactor: 0.3,
+    bufferZone: 50,
 };
-
 /**
  * Adaptive backoff algorithm for request rate limiting
  * Uses sliding window to track success rate and adjust delay accordingly
@@ -102,11 +104,13 @@ class AdaptiveBackoff {
 
     private adjustBaseDelay(): void {
         const successRate = this.calculateSuccessRate();
+        const minBound = this.config.minDelay + this.config.bufferZone;
+        const maxBound = this.config.maxDelay - this.config.bufferZone;
         
         if (successRate >= this.config.speedUpThreshold) {
             // High success rate: speed up
             this.currentBaseDelay = Math.max(
-                this.config.minDelay,
+                minBound,
                 this.currentBaseDelay * this.config.decayFactor
             );
         } else if (successRate >= this.config.stableThreshold) {
@@ -115,20 +119,27 @@ class AdaptiveBackoff {
         } else if (successRate >= this.config.slowdownThreshold) {
             // Low success rate: moderate slowdown
             this.currentBaseDelay = Math.min(
-                this.config.maxDelay,
+                maxBound,
                 this.currentBaseDelay * this.config.moderateIncrease
             );
         } else {
             // Very low success rate: aggressive slowdown
             this.currentBaseDelay = Math.min(
-                this.config.maxDelay,
+                maxBound,
                 this.currentBaseDelay * this.config.aggressiveIncrease
             );
         }
     }
 
     private getRandomDelay(min: number, max: number): number {
-        return Math.floor(Math.random() * (max - min + 1)) + min;
+        // Apply centered jitter: baseDelay * (1 - jitterFactor + 2 * jitterFactor * random)
+        const base = this.currentBaseDelay;
+        const factor = this.config.jitterFactor;
+        const jitter = 1 - factor + 2 * factor * Math.random();
+        const jitteredDelay = Math.floor(base * jitter);
+        
+        // Clamp to [min, max] boundaries
+        return Math.min(Math.max(jitteredDelay, min), max);
     }
 }
 class SearchQueue {
