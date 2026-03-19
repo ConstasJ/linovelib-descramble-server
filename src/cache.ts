@@ -9,6 +9,12 @@ import {
 } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { zstdCompress as zc, zstdDecompress as zd } from "node:zlib";
+import {
+    dbAddNovelsForKeyword,
+    dbSetChapterPath,
+    dbSetCoverMeta,
+    dbSetGeneralCache,
+} from "./db";
 
 const zstdCompress = (data: Buffer): Promise<Buffer> => {
     return new Promise((resolve, reject) => {
@@ -54,6 +60,11 @@ export function getCache<T>(key: string): T | undefined {
 
 export function setCache<T>(key: string, value: T): void {
     generalCache.set(key, value);
+    try {
+        dbSetGeneralCache(key, value);
+    } catch (e) {
+        console.error("[DB] dual-write generalCache failed:", e);
+    }
 }
 
 export function clearNovelsCache(): void {
@@ -67,6 +78,11 @@ export function addToNovelsCache(keyword: string, novels: NovelItem[]): void {
         novels: novels,
     });
     novelsCache.push(...novels);
+    try {
+        dbAddNovelsForKeyword(keyword, novels);
+    } catch (e) {
+        console.error("[DB] dual-write novels failed:", e);
+    }
 }
 
 export function searchNovelsInCache(query: string): NovelItem[] {
@@ -88,7 +104,10 @@ export async function getNovelContentFromStorage(
     chapterId: number,
 ): Promise<string | null> {
     const novelCacheDir = `${novelsCacheDir}/${novelId}`;
-    if (!existsSync(novelCacheDir) || (await stat(novelCacheDir)).isDirectory() === false) {
+    if (
+        !existsSync(novelCacheDir) ||
+        (await stat(novelCacheDir)).isDirectory() === false
+    ) {
         return null;
     }
     const chapterFilePath = `${novelCacheDir}/${chapterId}.zst`;
@@ -108,7 +127,10 @@ export async function setNovelContentToStorage(
     const novelCacheDir = `${novelsCacheDir}/${novelId}`;
     if (!existsSync(novelCacheDir)) {
         await mkdir(novelCacheDir, { recursive: true });
-    } else if (existsSync(novelCacheDir) && !(await stat(novelCacheDir)).isDirectory()) {
+    } else if (
+        existsSync(novelCacheDir) &&
+        !(await stat(novelCacheDir)).isDirectory()
+    ) {
         await rm(novelCacheDir);
         await mkdir(novelCacheDir, { recursive: true });
     }
@@ -119,16 +141,17 @@ export async function setNovelContentToStorage(
 
 const chapterNameToPathCache: Map<string, string> = new Map();
 
-export function getChapterPathFromCache(
-    name: string,
-): string | undefined {
+export function getChapterPathFromCache(name: string): string | undefined {
     return chapterNameToPathCache.get(name);
 }
 
-export function setChapterPathToCache(
-    name: string, path: string,
-): void {
+export function setChapterPathToCache(name: string, path: string): void {
     chapterNameToPathCache.set(name, path);
+    try {
+        dbSetChapterPath(name, path);
+    } catch (e) {
+        console.error("[DB] dual-write chapterPath failed:", e);
+    }
 }
 
 export function createDataDirIfNotExists() {
@@ -196,6 +219,11 @@ export async function setCoverToCache(
         originalUrl: url,
         ext,
     });
+    try {
+        dbSetCoverMeta(hash, contentType, url, ext);
+    } catch (e) {
+        console.error("[DB] dual-write coverMeta failed:", e);
+    }
 }
 
 export function saveCache() {

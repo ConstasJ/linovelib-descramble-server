@@ -14,6 +14,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/babel__traverse": "^7.28.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/compressible": "^2.0.3",
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
@@ -27,10 +28,16 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
   "dependencies": {
     "@babel/parser": "^7.28.6",
     "@babel/traverse": "^7.28.6",
     "@babel/types": "^7.28.6",
+    "better-sqlite3": "^12.8.0",
     "cheerio": "^1.1.2",
     "compressible": "^2.0.18",
     "express": "^5.2.1",

@@ -2,7 +2,12 @@ import express from "express";
 import morgan from "morgan";
 import { getCoefficientsFromPage } from "./coefficient";
 import { decrypt } from "./decrypt";
-import { fetchBinary, fetchText, transformChapterName, transformContent } from "./utils";
+import {
+    fetchBinary,
+    fetchText,
+    transformChapterName,
+    transformContent,
+} from "./utils";
 import { load } from "cheerio";
 import {
     addToNovelsCache,
@@ -16,8 +21,11 @@ import {
     setChapterPathToCache,
     setNovelContentToStorage,
 } from "./cache";
+import { initDB, closeDB, migrateFromCacheJson } from "./db";
 import { novelChapterQueue, searchQueue } from "./queue";
 import { NovelItem } from "./types";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 const COVER_URL_PREFIX = "https://www.linovelib.com/files/article/image";
 
@@ -59,9 +67,34 @@ function rewriteCoverUrls(results: NovelItem[], baseUrl: string): void {
     }
 }
 
-
 async function main() {
+    // Initialize SQLite database (Phase 1: dual-write mode)
+    initDB();
+
+    // Load existing cache.json into memory (existing behavior)
     await loadCache();
+
+    // One-time migration: if cache.json exists but DB is fresh, seed SQLite from cache.json
+    const dataDir = process.env.DATA_DIR || "./data";
+    const cacheJsonPath = `${dataDir}/cache.json`;
+    const dbMigratedMarker = `${dataDir}/.db_migrated`;
+    if (existsSync(cacheJsonPath) && !existsSync(dbMigratedMarker)) {
+        try {
+            console.log("[DB] Migrating cache.json → SQLite...");
+            const raw = await readFile(cacheJsonPath, "utf-8");
+            const cacheData = JSON.parse(raw);
+            migrateFromCacheJson(cacheData);
+            // Write marker so we don't re-migrate
+            const { writeFileSync } = await import("node:fs");
+            writeFileSync(dbMigratedMarker, new Date().toISOString(), "utf-8");
+        } catch (e) {
+            console.error(
+                "[DB] Migration failed (non-fatal, will retry next start):",
+                e,
+            );
+        }
+    }
+
     const app = express();
 
     app.set("trust proxy", true);
@@ -280,10 +313,7 @@ async function main() {
                                 $temp("div.mlfy_page a:first").attr("href") ||
                                 "";
                         }
-                        setChapterPathToCache(
-                            lastChapterName,
-                            lastChapterPath,
-                        );
+                        setChapterPathToCache(lastChapterName, lastChapterPath);
                         chapters.push({
                             name: `${volumeName} - ${lastChapterName}`,
                             path: lastChapterPath,
@@ -338,20 +368,17 @@ async function main() {
             const fp = await searchQueue.performFirstSearch(keyword);
             const $ = load(fp);
             if ($("div.book-html-box").length > 0) {
-                const results: NovelItem[] =
-                    [
-                        {
-                            name: $("h1.book-name").text().trim(),
-                            path:
-                                $("meta[name=url]")
-                                    .attr("content")
-                                    ?.replace(
-                                        "https://www.linovelib.com",
-                                        "",
-                                    ) || "",
-                            cover: $("div.book-img img").attr("src") || "",
-                        },
-                    ];
+                const results: NovelItem[] = [
+                    {
+                        name: $("h1.book-name").text().trim(),
+                        path:
+                            $("meta[name=url]")
+                                .attr("content")
+                                ?.replace("https://www.linovelib.com", "") ||
+                            "",
+                        cover: $("div.book-img img").attr("src") || "",
+                    },
+                ];
                 const baseUrl = `${req.protocol}://${req.get("host")}`;
                 rewriteCoverUrls(results, baseUrl);
                 addToNovelsCache(keyword, results);
@@ -431,6 +458,8 @@ async function main() {
         try {
             console.log("Saving cache...");
             saveCache();
+            console.log("Closing database...");
+            closeDB();
             console.log("Closing server...");
             if (server && server.listening) {
                 server.close();
