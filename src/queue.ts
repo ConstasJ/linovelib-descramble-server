@@ -10,138 +10,35 @@ import {
 import { load } from "cheerio";
 
 /**
- * Configuration for adaptive backoff algorithm
+ * Simple backoff strategy for request rate limiting
+ * - Normal delay: 50-100ms random
+ * - Failure delay: 8000ms (8 seconds)
  */
-interface BackoffConfig {
-    initialBaseDelay: number;  // Starting delay in ms
-    minDelay: number;          // Minimum delay floor
-    maxDelay: number;          // Maximum delay ceiling
-    windowSize: number;        // Sliding window size for success rate
-    speedUpThreshold: number;  // Success rate to trigger speedup (0.9)
-    stableThreshold: number;   // Success rate for stable state (0.7)
-    slowdownThreshold: number; // Success rate for moderate slowdown (0.5)
-    decayFactor: number;       // Multiplier when speeding up (0.8)
-    moderateIncrease: number;  // Multiplier for moderate slowdown (1.5)
-    aggressiveIncrease: number;// Multiplier for aggressive slowdown (2.0)
-    jitterFactor: number;      // Jitter randomization factor (0.3 = ±30%)
-    bufferZone: number;        // Buffer zone to preserve jitter space (ms)
-}
-const DEFAULT_BACKOFF_CONFIG: BackoffConfig = {
-    initialBaseDelay: 1000,
-    minDelay: 500,
-    maxDelay: 10000,
-    windowSize: 10,
-    speedUpThreshold: 0.9,
-    stableThreshold: 0.7,
-    slowdownThreshold: 0.5,
-    decayFactor: 0.5,
-    moderateIncrease: 1.5,
-    aggressiveIncrease: 2.0,
-    jitterFactor: 0.3,
-    bufferZone: 50,
-};
-/**
- * Adaptive backoff algorithm for request rate limiting
- * Uses sliding window to track success rate and adjust delay accordingly
- */
-class AdaptiveBackoff {
-    private config: BackoffConfig;
-    private currentBaseDelay: number;
-    private successWindow: boolean[]; // Circular buffer for success/failure tracking
-    private windowIndex: number = 0;
+class SimpleBackoff {
+    private readonly NORMAL_DELAY_MIN = 500;
+    private readonly NORMAL_DELAY_MAX = 600;
+    private readonly FAILURE_DELAY = 15000;
 
-    constructor(config: Partial<BackoffConfig> = {}) {
-        this.config = { ...DEFAULT_BACKOFF_CONFIG, ...config };
-        this.currentBaseDelay = this.config.initialBaseDelay;
-        this.successWindow = new Array(this.config.windowSize).fill(true);
+    /**
+     * Get delay for normal (successful) operation
+     * @returns Random delay in range [500, 600]ms
+     */
+    getDelayForSuccess(): number {
+        return (
+            this.NORMAL_DELAY_MIN +
+            Math.random() * (this.NORMAL_DELAY_MAX - this.NORMAL_DELAY_MIN)
+        );
     }
 
     /**
-     * Records the outcome of a request
-     * @param success - true if request succeeded, false if failed
+     * Get delay after a failure
+     * @returns Fixed delay of 8000ms
      */
-    recordOutcome(success: boolean): void {
-        this.successWindow[this.windowIndex] = success;
-        this.windowIndex = (this.windowIndex + 1) % this.config.windowSize;
-        this.adjustBaseDelay();
-    }
-
-    /**
-     * Calculates the next delay with full jitter
-     * @returns delay in milliseconds
-     */
-    getNextDelay(): number {
-        return this.getRandomDelay(this.config.minDelay, this.currentBaseDelay);
-    }
-
-    /**
-     * Resets backoff to initial state
-     */
-    reset(): void {
-        this.currentBaseDelay = this.config.initialBaseDelay;
-        this.successWindow.fill(true);
-        this.windowIndex = 0;
-    }
-
-    /**
-     * Gets current base delay for monitoring
-     */
-    getCurrentBaseDelay(): number {
-        return this.currentBaseDelay;
-    }
-
-    /**
-     * Gets current success rate for monitoring
-     */
-    getSuccessWindowRate(): number {
-        return this.calculateSuccessRate();
-    }
-
-    private calculateSuccessRate(): number {
-        const successCount = this.successWindow.filter(s => s).length;
-        return successCount / this.config.windowSize;
-    }
-
-    private adjustBaseDelay(): void {
-        const successRate = this.calculateSuccessRate();
-        const minBound = this.config.minDelay + this.config.bufferZone;
-        const maxBound = this.config.maxDelay - this.config.bufferZone;
-        
-        if (successRate >= this.config.speedUpThreshold) {
-            // High success rate: speed up
-            this.currentBaseDelay = Math.max(
-                minBound,
-                this.currentBaseDelay * this.config.decayFactor
-            );
-        } else if (successRate >= this.config.stableThreshold) {
-            // Moderate success rate: keep stable
-            // No change
-        } else if (successRate >= this.config.slowdownThreshold) {
-            // Low success rate: moderate slowdown
-            this.currentBaseDelay = Math.min(
-                maxBound,
-                this.currentBaseDelay * this.config.moderateIncrease
-            );
-        } else {
-            // Very low success rate: aggressive slowdown
-            this.currentBaseDelay = Math.min(
-                maxBound,
-                this.currentBaseDelay * this.config.aggressiveIncrease
-            );
-        }
-    }
-
-    private getRandomDelay(min: number, max: number): number {
-        // Apply centered jitter: baseDelay * (1 - jitterFactor + 2 * jitterFactor * random)
-        const base = this.currentBaseDelay;
-        const factor = this.config.jitterFactor;
-        const jitter = 1 - factor + 2 * factor * Math.random();
-        const jitteredDelay = Math.floor(base * jitter);
-        
-        // Clamp to [min, max] boundaries
-        return Math.min(Math.max(jitteredDelay, min), max);
+    getDelayForFailure(): number {
+        return this.FAILURE_DELAY;
     }
 }
+
 class SearchQueue {
     private queue: PQueue;
     private lastFinishTime: number = 0;
@@ -236,14 +133,13 @@ class SearchQueue {
 
 class NovelChapterQueue {
     private queue: PQueue;
-    private backoff: AdaptiveBackoff;
+    private backoff: SimpleBackoff;
 
     constructor() {
         this.queue = new PQueue({
             concurrency: 1,
         });
-        this.backoff = new AdaptiveBackoff();
-
+        this.backoff = new SimpleBackoff();
     }
 
     private sleep(ms: number): Promise<void> {
@@ -304,14 +200,11 @@ class NovelChapterQueue {
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     const content = await fetchText(url);
-                    this.backoff.recordOutcome(true); // Record success
 
-                    // Log successful request
-                    const delay = this.backoff.getNextDelay();
-                    const successRate = this.backoff.getSuccessWindowRate();
-                    const baseDelay = this.backoff.getCurrentBaseDelay();
+                    // Success: apply normal delay (50-100ms random)
+                    const delay = this.backoff.getDelayForSuccess();
                     console.log(
-                        `[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求成功，延时 ${delay}ms (成功率: ${successRate.toFixed(2)}, 基础延时: ${baseDelay}ms)`,
+                        `[ChapterQueue] 小说${novelId}-章节${chapterId}-Part${partId}请求成功，将等待 ${Math.round(delay)}ms`,
                     );
                     await this.sleep(delay);
 
@@ -320,22 +213,17 @@ class NovelChapterQueue {
                     lastError = e as Error;
                     const isCFBlock = this.isCloudflareBlock(e);
 
-                    // Record failure for backoff adjustment
-                    this.backoff.recordOutcome(false);
-
                     // Check if we should retry
-                    const shouldRetry = 
-                        (isCFBlock || e instanceof AccessDeniedError) && 
+                    const shouldRetry =
+                        (isCFBlock || e instanceof AccessDeniedError) &&
                         attempt < maxRetries;
 
                     if (shouldRetry) {
-                        // Get adaptive delay for retry
-                        const retryDelay = this.backoff.getNextDelay();
-                        const successRate = this.backoff.getSuccessWindowRate();
-                        const baseDelay = this.backoff.getCurrentBaseDelay();
+                        // Failure: apply large delay (8 seconds)
+                        const retryDelay = this.backoff.getDelayForFailure();
 
                         console.warn(
-                            `[ChapterQueue] 检测到访问限制 (尝试 ${attempt}/${maxRetries})，延时 ${retryDelay}ms 后重试 (成功率: ${successRate.toFixed(2)}, 基础延时: ${baseDelay}ms)`,
+                            `[ChapterQueue] 检测到访问限制 (尝试 ${attempt}/${maxRetries})，将延迟 ${retryDelay / 1000}s 后重试`,
                         );
 
                         await this.sleep(retryDelay);
@@ -352,8 +240,8 @@ class NovelChapterQueue {
                             );
                         }
 
-                        // Still apply delay before next request in queue
-                        const delay = this.backoff.getNextDelay();
+                        // Still apply normal delay before throwing
+                        const delay = this.backoff.getDelayForSuccess();
                         await this.sleep(delay);
 
                         throw new Error(`获取章节Part内容失败: ${lastError.message}`);
@@ -365,7 +253,6 @@ class NovelChapterQueue {
             throw lastError!;
         });
     }
-
 }
 
 // 导出单例，确保全站共用同一个限流器
