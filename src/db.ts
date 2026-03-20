@@ -1,19 +1,34 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import {
+    chapterPaths,
+    coverMetadata,
+    generalCache,
+    keywordNovels,
+    keywordSearches,
+    novels,
+} from "./schema";
 import { NovelItem } from "./types";
 
 const dataDir = process.env.DATA_DIR || "./data";
 const DB_PATH = `${dataDir}/cache.db`;
 
 let db: Database.Database | null = null;
+let orm: ReturnType<typeof drizzle> | null = null;
 
 function getDb(): Database.Database {
     if (!db) throw new Error("Database not initialized. Call initDB() first.");
     return db;
 }
 
+function getOrm(): NonNullable<typeof orm> {
+    if (!orm) throw new Error("Database not initialized. Call initDB() first.");
+    return orm;
+}
+
 export function initDB(): void {
-    // Ensure data directory exists
     if (!existsSync(dataDir)) {
         mkdirSync(dataDir, { recursive: true });
     }
@@ -23,20 +38,20 @@ export function initDB(): void {
     }
 
     db = new Database(DB_PATH);
+    orm = drizzle(db);
 
-    // Performance pragmas
     db.pragma("journal_mode = WAL");
     db.pragma("synchronous = NORMAL");
     db.pragma("foreign_keys = ON");
 
     createTables();
-    prepareStatements();
 }
 
 export function closeDB(): void {
     if (db) {
         db.close();
         db = null;
+        orm = null;
     }
 }
 
@@ -84,131 +99,77 @@ function createTables(): void {
     `);
 }
 
-// Prepared statements cache
-let stmts: {
-    upsertNovel: Database.Statement;
-    getNovelByPath: Database.Statement;
-    upsertKeywordSearch: Database.Statement;
-    upsertKeywordNovel: Database.Statement;
-    getKeywordSearch: Database.Statement;
-    getNovelsByKeyword: Database.Statement;
-    upsertChapterPath: Database.Statement;
-    getChapterPath: Database.Statement;
-    upsertCoverMeta: Database.Statement;
-    getCoverMeta: Database.Statement;
-    upsertGeneralCache: Database.Statement;
-    getGeneralCache: Database.Statement;
-} | null = null;
-
-function prepareStatements(): void {
-    const d = getDb();
-    stmts = {
-        upsertNovel: d.prepare(`
-            INSERT INTO novels (path, name, cover) VALUES (@path, @name, @cover)
-            ON CONFLICT(path) DO UPDATE SET name=@name, cover=@cover
-            RETURNING id
-        `),
-        getNovelByPath: d.prepare(
-            `SELECT id, path, name, cover FROM novels WHERE path = ?`,
-        ),
-        upsertKeywordSearch: d.prepare(`
-            INSERT INTO keyword_searches (keyword, query_time, total) VALUES (@keyword, @queryTime, @total)
-            ON CONFLICT(keyword) DO UPDATE SET query_time=@queryTime, total=@total
-        `),
-        upsertKeywordNovel: d.prepare(`
-            INSERT OR IGNORE INTO keyword_novels (keyword, novel_id) VALUES (@keyword, @novelId)
-        `),
-        getKeywordSearch: d.prepare(
-            `SELECT keyword, query_time, total FROM keyword_searches WHERE keyword = ?`,
-        ),
-        getNovelsByKeyword: d.prepare(`
-            SELECT n.path, n.name, n.cover
-            FROM keyword_novels kn
-            JOIN novels n ON kn.novel_id = n.id
-            WHERE kn.keyword = ?
-        `),
-        upsertChapterPath: d.prepare(`
-            INSERT INTO chapter_paths (name, path) VALUES (@name, @path)
-            ON CONFLICT(name) DO UPDATE SET path=@path
-        `),
-        getChapterPath: d.prepare(
-            `SELECT path FROM chapter_paths WHERE name = ?`,
-        ),
-        upsertCoverMeta: d.prepare(`
-            INSERT INTO cover_metadata (hash, content_type, original_url, ext)
-            VALUES (@hash, @contentType, @originalUrl, @ext)
-            ON CONFLICT(hash) DO UPDATE SET content_type=@contentType, original_url=@originalUrl, ext=@ext
-        `),
-        getCoverMeta: d.prepare(
-            `SELECT content_type, original_url, ext FROM cover_metadata WHERE hash = ?`,
-        ),
-        upsertGeneralCache: d.prepare(`
-            INSERT INTO general_cache (key, value) VALUES (@key, @value)
-            ON CONFLICT(key) DO UPDATE SET value=@value
-        `),
-        getGeneralCache: d.prepare(
-            `SELECT value FROM general_cache WHERE key = ?`,
-        ),
-    };
-}
-
-function getStmts() {
-    if (!stmts)
-        throw new Error("Statements not prepared. Call initDB() first.");
-    return stmts;
-}
-
 // ========== Novel + Keyword CRUD ==========
 
 export function dbAddNovelsForKeyword(
     keyword: string,
-    novels: NovelItem[],
+    novelsList: NovelItem[],
 ): void {
-    const d = getDb();
-    const s = getStmts();
+    const d = getOrm();
 
-    const run = d.transaction(() => {
-        // Upsert keyword search record
-        s.upsertKeywordSearch.run({
-            keyword,
-            queryTime: Date.now(),
-            total: novels.length,
-        });
+    d.transaction((tx) => {
+        tx.insert(keywordSearches)
+            .values({
+                keyword,
+                queryTime: Date.now(),
+                total: novelsList.length,
+            })
+            .onConflictDoUpdate({
+                target: keywordSearches.keyword,
+                set: { queryTime: Date.now(), total: novelsList.length },
+            })
+            .run();
 
-        for (const novel of novels) {
-            // Upsert novel, get its id
-            const row = s.upsertNovel.get({
-                path: novel.path,
-                name: novel.name,
-                cover: novel.cover || null,
-            }) as { id: number } | undefined;
+        for (const novel of novelsList) {
+            const inserted = tx
+                .insert(novels)
+                .values({
+                    path: novel.path,
+                    name: novel.name,
+                    cover: novel.cover || null,
+                })
+                .onConflictDoUpdate({
+                    target: novels.path,
+                    set: { name: novel.name, cover: novel.cover || null },
+                })
+                .returning({ id: novels.id })
+                .all();
 
-            if (row) {
-                s.upsertKeywordNovel.run({ keyword, novelId: row.id });
+            const novelRow = inserted[0];
+            if (novelRow) {
+                tx.insert(keywordNovels)
+                    .values({ keyword, novelId: novelRow.id })
+                    .onConflictDoNothing()
+                    .run();
             }
         }
     });
-
-    run();
 }
 
 export function dbSearchNovels(keyword: string): NovelItem[] | null {
-    const s = getStmts();
-    const search = s.getKeywordSearch.get(keyword) as
-        | { keyword: string; query_time: number; total: number }
-        | undefined;
+    const d = getOrm();
+    const minQueryTime = Date.now() - 48 * 60 * 60 * 1000;
+
+    const searchRows = d
+        .select({ keyword: keywordSearches.keyword })
+        .from(keywordSearches)
+        .where(
+            and(
+                eq(keywordSearches.keyword, keyword),
+                gte(keywordSearches.queryTime, minQueryTime),
+            ),
+        )
+        .all();
+    const search = searchRows[0];
     if (!search) return null;
 
-    // Check 48h TTL
-    if (Date.now() - search.query_time >= 48 * 60 * 60 * 1000) {
-        return null;
-    }
+    const rows = d
+        .select({ path: novels.path, name: novels.name, cover: novels.cover })
+        .from(keywordNovels)
+        .innerJoin(novels, eq(keywordNovels.novelId, novels.id))
+        .where(eq(keywordNovels.keyword, keyword))
+        .all();
 
-    const rows = s.getNovelsByKeyword.all(keyword) as Array<{
-        path: string;
-        name: string;
-        cover: string | null;
-    }>;
     return rows.map((r) => ({
         path: r.path,
         name: r.name,
@@ -219,13 +180,19 @@ export function dbSearchNovels(keyword: string): NovelItem[] | null {
 // ========== Chapter Path CRUD ==========
 
 export function dbSetChapterPath(name: string, path: string): void {
-    getStmts().upsertChapterPath.run({ name, path });
+    getOrm()
+        .insert(chapterPaths)
+        .values({ name, path })
+        .onConflictDoUpdate({ target: chapterPaths.name, set: { path } })
+        .run();
 }
 
 export function dbGetChapterPath(name: string): string | undefined {
-    const row = getStmts().getChapterPath.get(name) as
-        | { path: string }
-        | undefined;
+    const row = getOrm()
+        .select({ path: chapterPaths.path })
+        .from(chapterPaths)
+        .where(eq(chapterPaths.name, name))
+        .all()[0];
     return row?.path;
 }
 
@@ -237,33 +204,50 @@ export function dbSetCoverMeta(
     originalUrl: string,
     ext: string,
 ): void {
-    getStmts().upsertCoverMeta.run({ hash, contentType, originalUrl, ext });
+    getOrm()
+        .insert(coverMetadata)
+        .values({ hash, contentType, originalUrl, ext })
+        .onConflictDoUpdate({
+            target: coverMetadata.hash,
+            set: { contentType, originalUrl, ext },
+        })
+        .run();
 }
 
 export function dbGetCoverMeta(
     hash: string,
 ): { contentType: string; originalUrl: string; ext: string } | undefined {
-    const row = getStmts().getCoverMeta.get(hash) as
-        | { content_type: string; original_url: string; ext: string }
-        | undefined;
-    if (!row) return undefined;
-    return {
-        contentType: row.content_type,
-        originalUrl: row.original_url,
-        ext: row.ext,
-    };
+    const row = getOrm()
+        .select({
+            contentType: coverMetadata.contentType,
+            originalUrl: coverMetadata.originalUrl,
+            ext: coverMetadata.ext,
+        })
+        .from(coverMetadata)
+        .where(eq(coverMetadata.hash, hash))
+        .all()[0];
+    return row;
 }
 
 // ========== General Cache CRUD ==========
 
 export function dbSetGeneralCache(key: string, value: unknown): void {
-    getStmts().upsertGeneralCache.run({ key, value: JSON.stringify(value) });
+    getOrm()
+        .insert(generalCache)
+        .values({ key, value: JSON.stringify(value) })
+        .onConflictDoUpdate({
+            target: generalCache.key,
+            set: { value: JSON.stringify(value) },
+        })
+        .run();
 }
 
 export function dbGetGeneralCache<T>(key: string): T | undefined {
-    const row = getStmts().getGeneralCache.get(key) as
-        | { value: string }
-        | undefined;
+    const row = getOrm()
+        .select({ value: generalCache.value })
+        .from(generalCache)
+        .where(eq(generalCache.key, key))
+        .all()[0];
     if (!row) return undefined;
     return JSON.parse(row.value) as T;
 }
@@ -276,23 +260,34 @@ export function dbGetAllKeywordSearches(): Array<{
     total: number;
     novels: NovelItem[];
 }> {
-    const d = getDb();
+    const d = getOrm();
     const keywords = d
-        .prepare(`SELECT keyword, query_time, total FROM keyword_searches`)
-        .all() as Array<{ keyword: string; query_time: number; total: number }>;
+        .select({
+            keyword: keywordSearches.keyword,
+            queryTime: keywordSearches.queryTime,
+            total: keywordSearches.total,
+        })
+        .from(keywordSearches)
+        .orderBy(sql`${keywordSearches.keyword}`)
+        .all();
 
-    const getNovelsByKw = getStmts().getNovelsByKeyword;
     return keywords.map((kw) => {
-        const novels = getNovelsByKw.all(kw.keyword) as Array<{
-            path: string;
-            name: string;
-            cover: string | null;
-        }>;
+        const rows = d
+            .select({
+                path: novels.path,
+                name: novels.name,
+                cover: novels.cover,
+            })
+            .from(keywordNovels)
+            .innerJoin(novels, eq(keywordNovels.novelId, novels.id))
+            .where(eq(keywordNovels.keyword, kw.keyword))
+            .all();
+
         return {
             keyword: kw.keyword,
-            queryTime: kw.query_time,
+            queryTime: kw.queryTime,
             total: kw.total,
-            novels: novels.map((n) => ({
+            novels: rows.map((n) => ({
                 path: n.path,
                 name: n.name,
                 cover: n.cover || "",
@@ -302,9 +297,10 @@ export function dbGetAllKeywordSearches(): Array<{
 }
 
 export function dbGetAllChapterPaths(): Record<string, string> {
-    const rows = getDb()
-        .prepare(`SELECT name, path FROM chapter_paths`)
-        .all() as Array<{ name: string; path: string }>;
+    const rows = getOrm()
+        .select({ name: chapterPaths.name, path: chapterPaths.path })
+        .from(chapterPaths)
+        .all();
     const result: Record<string, string> = {};
     for (const r of rows) result[r.name] = r.path;
     return result;
@@ -314,24 +310,23 @@ export function dbGetAllCoverMetadata(): Record<
     string,
     { contentType: string; originalUrl: string; ext: string }
 > {
-    const rows = getDb()
-        .prepare(
-            `SELECT hash, content_type, original_url, ext FROM cover_metadata`,
-        )
-        .all() as Array<{
-        hash: string;
-        content_type: string;
-        original_url: string;
-        ext: string;
-    }>;
+    const rows = getOrm()
+        .select({
+            hash: coverMetadata.hash,
+            contentType: coverMetadata.contentType,
+            originalUrl: coverMetadata.originalUrl,
+            ext: coverMetadata.ext,
+        })
+        .from(coverMetadata)
+        .all();
     const result: Record<
         string,
         { contentType: string; originalUrl: string; ext: string }
     > = {};
     for (const r of rows) {
         result[r.hash] = {
-            contentType: r.content_type,
-            originalUrl: r.original_url,
+            contentType: r.contentType,
+            originalUrl: r.originalUrl,
             ext: r.ext,
         };
     }
@@ -339,9 +334,10 @@ export function dbGetAllCoverMetadata(): Record<
 }
 
 export function dbGetAllGeneralCache(): Record<string, unknown> {
-    const rows = getDb()
-        .prepare(`SELECT key, value FROM general_cache`)
-        .all() as Array<{ key: string; value: string }>;
+    const rows = getOrm()
+        .select({ key: generalCache.key, value: generalCache.value })
+        .from(generalCache)
+        .all();
     const result: Record<string, unknown> = {};
     for (const r of rows) {
         try {
@@ -371,57 +367,91 @@ interface CacheJsonData {
 }
 
 export function migrateFromCacheJson(cacheData: CacheJsonData): void {
-    const d = getDb();
-    const s = getStmts();
+    const d = getOrm();
 
-    const run = d.transaction(() => {
-        // 1. Migrate novels + keyword mappings
+    d.transaction((tx) => {
         if (cacheData.keywordsToNovelsMap) {
             for (const [keyword, entry] of Object.entries(
                 cacheData.keywordsToNovelsMap,
             )) {
-                s.upsertKeywordSearch.run({
-                    keyword,
-                    queryTime: entry.queryTime,
-                    total: entry.total,
-                });
+                tx.insert(keywordSearches)
+                    .values({
+                        keyword,
+                        queryTime: entry.queryTime,
+                        total: entry.total,
+                    })
+                    .onConflictDoUpdate({
+                        target: keywordSearches.keyword,
+                        set: { queryTime: entry.queryTime, total: entry.total },
+                    })
+                    .run();
+
                 for (const novel of entry.novels) {
-                    const row = s.upsertNovel.get({
-                        path: novel.path,
-                        name: novel.name,
-                        cover: novel.cover || null,
-                    }) as { id: number } | undefined;
-                    if (row) {
-                        s.upsertKeywordNovel.run({ keyword, novelId: row.id });
+                    const inserted = tx
+                        .insert(novels)
+                        .values({
+                            path: novel.path,
+                            name: novel.name,
+                            cover: novel.cover || null,
+                        })
+                        .onConflictDoUpdate({
+                            target: novels.path,
+                            set: {
+                                name: novel.name,
+                                cover: novel.cover || null,
+                            },
+                        })
+                        .returning({ id: novels.id })
+                        .all();
+
+                    const novelRow = inserted[0];
+                    if (novelRow) {
+                        tx.insert(keywordNovels)
+                            .values({ keyword, novelId: novelRow.id })
+                            .onConflictDoNothing()
+                            .run();
                     }
                 }
             }
         }
 
-        // 2. Migrate chapter paths
         if (cacheData.chapterNameToPathCache) {
             for (const [name, path] of Object.entries(
                 cacheData.chapterNameToPathCache,
             )) {
-                s.upsertChapterPath.run({ name, path });
+                tx.insert(chapterPaths)
+                    .values({ name, path })
+                    .onConflictDoUpdate({
+                        target: chapterPaths.name,
+                        set: { path },
+                    })
+                    .run();
             }
         }
 
-        // 3. Migrate cover metadata
         if (cacheData.coverMetadata) {
             for (const [hash, meta] of Object.entries(
                 cacheData.coverMetadata,
             )) {
-                s.upsertCoverMeta.run({
-                    hash,
-                    contentType: meta.contentType,
-                    originalUrl: meta.originalUrl,
-                    ext: meta.ext,
-                });
+                tx.insert(coverMetadata)
+                    .values({
+                        hash,
+                        contentType: meta.contentType,
+                        originalUrl: meta.originalUrl,
+                        ext: meta.ext,
+                    })
+                    .onConflictDoUpdate({
+                        target: coverMetadata.hash,
+                        set: {
+                            contentType: meta.contentType,
+                            originalUrl: meta.originalUrl,
+                            ext: meta.ext,
+                        },
+                    })
+                    .run();
             }
         }
 
-        // 4. Migrate general cache entries (skip known structured keys)
         const skipKeys = new Set([
             "lastUpdate",
             "novels",
@@ -431,11 +461,16 @@ export function migrateFromCacheJson(cacheData: CacheJsonData): void {
         ]);
         for (const [key, value] of Object.entries(cacheData)) {
             if (!skipKeys.has(key)) {
-                s.upsertGeneralCache.run({ key, value: JSON.stringify(value) });
+                tx.insert(generalCache)
+                    .values({ key, value: JSON.stringify(value) })
+                    .onConflictDoUpdate({
+                        target: generalCache.key,
+                        set: { value: JSON.stringify(value) },
+                    })
+                    .run();
             }
         }
     });
 
-    run();
     console.log("[DB] Migration from cache.json completed.");
 }

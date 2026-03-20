@@ -40,6 +40,7 @@
     "better-sqlite3": "^12.8.0",
     "cheerio": "^1.1.2",
     "compressible": "^2.0.18",
+    "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
     "morgan": "^1.10.1",
     "on-headers": "^1.1.0",
