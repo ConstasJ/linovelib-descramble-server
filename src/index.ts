@@ -14,7 +14,6 @@ import {
     getChapterPathFromCache,
     getCoverFromCache,
     getNovelContentFromStorage,
-    loadCache,
     saveCache,
     searchNovelsInCache,
     setCoverToCache,
@@ -68,11 +67,8 @@ function rewriteCoverUrls(results: NovelItem[], baseUrl: string): void {
 }
 
 async function main() {
-    // Initialize SQLite database (Phase 1: dual-write mode)
+    // Initialize SQLite database
     initDB();
-
-    // Load existing cache.json into memory (existing behavior)
-    await loadCache();
 
     // One-time migration: if cache.json exists but DB is fresh, seed SQLite from cache.json
     const dataDir = process.env.DATA_DIR || "./data";
@@ -456,7 +452,7 @@ async function main() {
             forceExitTimeout.unref();
         }
         try {
-            console.log("Saving cache...");
+            console.log("Saving cache backup...");
             saveCache();
             console.log("Closing database...");
             closeDB();

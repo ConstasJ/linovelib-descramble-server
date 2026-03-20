@@ -268,6 +268,91 @@ export function dbGetGeneralCache<T>(key: string): T | undefined {
     return JSON.parse(row.value) as T;
 }
 
+// ========== Bulk Export (for backup) ==========
+
+export function dbGetAllKeywordSearches(): Array<{
+    keyword: string;
+    queryTime: number;
+    total: number;
+    novels: NovelItem[];
+}> {
+    const d = getDb();
+    const keywords = d
+        .prepare(`SELECT keyword, query_time, total FROM keyword_searches`)
+        .all() as Array<{ keyword: string; query_time: number; total: number }>;
+
+    const getNovelsByKw = getStmts().getNovelsByKeyword;
+    return keywords.map((kw) => {
+        const novels = getNovelsByKw.all(kw.keyword) as Array<{
+            path: string;
+            name: string;
+            cover: string | null;
+        }>;
+        return {
+            keyword: kw.keyword,
+            queryTime: kw.query_time,
+            total: kw.total,
+            novels: novels.map((n) => ({
+                path: n.path,
+                name: n.name,
+                cover: n.cover || "",
+            })),
+        };
+    });
+}
+
+export function dbGetAllChapterPaths(): Record<string, string> {
+    const rows = getDb()
+        .prepare(`SELECT name, path FROM chapter_paths`)
+        .all() as Array<{ name: string; path: string }>;
+    const result: Record<string, string> = {};
+    for (const r of rows) result[r.name] = r.path;
+    return result;
+}
+
+export function dbGetAllCoverMetadata(): Record<
+    string,
+    { contentType: string; originalUrl: string; ext: string }
+> {
+    const rows = getDb()
+        .prepare(
+            `SELECT hash, content_type, original_url, ext FROM cover_metadata`,
+        )
+        .all() as Array<{
+        hash: string;
+        content_type: string;
+        original_url: string;
+        ext: string;
+    }>;
+    const result: Record<
+        string,
+        { contentType: string; originalUrl: string; ext: string }
+    > = {};
+    for (const r of rows) {
+        result[r.hash] = {
+            contentType: r.content_type,
+            originalUrl: r.original_url,
+            ext: r.ext,
+        };
+    }
+    return result;
+}
+
+export function dbGetAllGeneralCache(): Record<string, unknown> {
+    const rows = getDb()
+        .prepare(`SELECT key, value FROM general_cache`)
+        .all() as Array<{ key: string; value: string }>;
+    const result: Record<string, unknown> = {};
+    for (const r of rows) {
+        try {
+            result[r.key] = JSON.parse(r.value);
+        } catch {
+            result[r.key] = r.value;
+        }
+    }
+    return result;
+}
+
 // ========== Migration: cache.json → SQLite ==========
 
 interface CacheJsonData {

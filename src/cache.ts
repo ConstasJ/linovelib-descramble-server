@@ -11,9 +11,17 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { zstdCompress as zc, zstdDecompress as zd } from "node:zlib";
 import {
     dbAddNovelsForKeyword,
+    dbSearchNovels,
     dbSetChapterPath,
+    dbGetChapterPath,
     dbSetCoverMeta,
+    dbGetCoverMeta,
     dbSetGeneralCache,
+    dbGetGeneralCache,
+    dbGetAllKeywordSearches,
+    dbGetAllChapterPaths,
+    dbGetAllCoverMetadata,
+    dbGetAllGeneralCache,
 } from "./db";
 
 const zstdCompress = (data: Buffer): Promise<Buffer> => {
@@ -40,62 +48,29 @@ const zstdDecompress = (data: Buffer): Promise<Buffer> => {
     });
 };
 
-const novelsCache: Array<NovelItem> = [];
-
-type KTNMValue = {
-    queryTime: number;
-    total: number;
-    novels: Array<NovelItem>;
-};
-
 const dataDir = process.env.DATA_DIR || "./data";
 
-const keywordsToNovelsMap: Map<string, KTNMValue> = new Map();
-
-const generalCache: Map<string, any> = new Map();
+// ========== General Cache ==========
 
 export function getCache<T>(key: string): T | undefined {
-    return generalCache.get(key);
+    return dbGetGeneralCache<T>(key);
 }
 
 export function setCache<T>(key: string, value: T): void {
-    generalCache.set(key, value);
-    try {
-        dbSetGeneralCache(key, value);
-    } catch (e) {
-        console.error("[DB] dual-write generalCache failed:", e);
-    }
+    dbSetGeneralCache(key, value);
 }
 
-export function clearNovelsCache(): void {
-    novelsCache.length = 0;
-}
+// ========== Novel Search Cache ==========
 
 export function addToNovelsCache(keyword: string, novels: NovelItem[]): void {
-    keywordsToNovelsMap.set(keyword, {
-        queryTime: Date.now(),
-        total: novels.length,
-        novels: novels,
-    });
-    novelsCache.push(...novels);
-    try {
-        dbAddNovelsForKeyword(keyword, novels);
-    } catch (e) {
-        console.error("[DB] dual-write novels failed:", e);
-    }
+    dbAddNovelsForKeyword(keyword, novels);
 }
 
 export function searchNovelsInCache(query: string): NovelItem[] {
-    if (
-        keywordsToNovelsMap.has(query) &&
-        Date.now() - keywordsToNovelsMap.get(query)!.queryTime <
-            48 * 60 * 60 * 1000
-    ) {
-        return keywordsToNovelsMap.get(query)!.novels;
-    } else {
-        return [];
-    }
+    return dbSearchNovels(query) || [];
 }
+
+// ========== Novel Content Storage (file-based, unchanged) ==========
 
 const novelsCacheDir = `${dataDir}/novels`;
 
@@ -139,20 +114,17 @@ export async function setNovelContentToStorage(
     await writeFile(chapterFilePath, compressedData);
 }
 
-const chapterNameToPathCache: Map<string, string> = new Map();
+// ========== Chapter Path Cache ==========
 
 export function getChapterPathFromCache(name: string): string | undefined {
-    return chapterNameToPathCache.get(name);
+    return dbGetChapterPath(name);
 }
 
 export function setChapterPathToCache(name: string, path: string): void {
-    chapterNameToPathCache.set(name, path);
-    try {
-        dbSetChapterPath(name, path);
-    } catch (e) {
-        console.error("[DB] dual-write chapterPath failed:", e);
-    }
+    dbSetChapterPath(name, path);
 }
+
+// ========== Cover Cache System ==========
 
 export function createDataDirIfNotExists() {
     if (!existsSync(dataDir)) {
@@ -164,17 +136,7 @@ export function createDataDirIfNotExists() {
     }
 }
 
-// ========== 封面缓存系统 ==========
-
 const coversCacheDir = `${dataDir}/covers`;
-
-type CoverMeta = {
-    contentType: string;
-    originalUrl: string;
-    ext: string;
-};
-
-const coverMetadataMap: Map<string, CoverMeta> = new Map();
 
 function getCoverHash(url: string): string {
     return createHash("md5").update(url).digest("hex");
@@ -194,7 +156,7 @@ export async function getCoverFromCache(
     url: string,
 ): Promise<{ data: Buffer; contentType: string } | null> {
     const hash = getCoverHash(url);
-    const meta = coverMetadataMap.get(hash);
+    const meta = dbGetCoverMeta(hash);
     if (!meta) return null;
     const filePath = `${coversCacheDir}/${hash}.${meta.ext}`;
     if (!existsSync(filePath)) return null;
@@ -214,69 +176,55 @@ export async function setCoverToCache(
     }
     const filePath = `${coversCacheDir}/${hash}.${ext}`;
     await writeFile(filePath, data);
-    coverMetadataMap.set(hash, {
-        contentType,
-        originalUrl: url,
-        ext,
-    });
-    try {
-        dbSetCoverMeta(hash, contentType, url, ext);
-    } catch (e) {
-        console.error("[DB] dual-write coverMeta failed:", e);
-    }
+    dbSetCoverMeta(hash, contentType, url, ext);
 }
+
+// ========== Backup: export SQLite → cache.json ==========
 
 export function saveCache() {
     createDataDirIfNotExists();
     const cacheFilePath = `${dataDir}/cache.json`;
-    let cacheData = {
-        lastUpdate: Date.now(),
-        novels: novelsCache,
-        keywordsToNovelsMap: Object.fromEntries(keywordsToNovelsMap),
-        chapterNameToPathCache: Object.fromEntries(chapterNameToPathCache),
-        coverMetadata: Object.fromEntries(coverMetadataMap),
-    };
-    // merge generalCache into cacheData
-    for (const [key, value] of generalCache.entries()) {
-        if (key in cacheData) continue;
-        (cacheData as any)[key] = value;
+
+    // Build backup from SQLite data
+    const keywordSearches = dbGetAllKeywordSearches();
+    const keywordsToNovelsMap: Record<
+        string,
+        { queryTime: number; total: number; novels: NovelItem[] }
+    > = {};
+    const allNovels: NovelItem[] = [];
+    for (const ks of keywordSearches) {
+        keywordsToNovelsMap[ks.keyword] = {
+            queryTime: ks.queryTime,
+            total: ks.total,
+            novels: ks.novels,
+        };
+        allNovels.push(...ks.novels);
     }
+
+    const cacheData: Record<string, unknown> = {
+        lastUpdate: Date.now(),
+        novels: allNovels,
+        keywordsToNovelsMap,
+        chapterNameToPathCache: dbGetAllChapterPaths(),
+        coverMetadata: dbGetAllCoverMetadata(),
+    };
+
+    // Merge general cache entries
+    const generalEntries = dbGetAllGeneralCache();
+    for (const [key, value] of Object.entries(generalEntries)) {
+        if (!(key in cacheData)) {
+            cacheData[key] = value;
+        }
+    }
+
     writeFileSync(cacheFilePath, JSON.stringify(cacheData), "utf-8");
 }
 
+/**
+ * loadCache is now a no-op. SQLite is the source of truth.
+ * Kept for API compatibility with index.ts startup sequence.
+ */
 export async function loadCache(): Promise<void> {
-    const novelCacheFilePath = `${dataDir}/cache.json`;
-    if (existsSync(novelCacheFilePath)) {
-        const fileData = await readFile(novelCacheFilePath, "utf-8");
-        const cacheData = JSON.parse(fileData);
-        novelsCache.push(...cacheData.novels);
-        for (const [key, value] of Object.entries(
-            cacheData.keywordsToNovelsMap,
-        )) {
-            keywordsToNovelsMap.set(key, value as KTNMValue);
-        }
-        for (const [key, value] of Object.entries(
-            cacheData.chapterNameToPathCache,
-        )) {
-            chapterNameToPathCache.set(key, value as string);
-        }
-        // 恢复封面元数据
-        if (cacheData.coverMetadata) {
-            for (const [key, value] of Object.entries(
-                cacheData.coverMetadata,
-            )) {
-                coverMetadataMap.set(key, value as CoverMeta);
-            }
-        }
-        // extract other entries into generalCache
-        for (const [key, value] of Object.entries(cacheData)) {
-            if (
-                key !== "lastUpdate" &&
-                key !== "novels" &&
-                key !== "keywordsToNovelsMap"
-            ) {
-                generalCache.set(key, value);
-            }
-        }
-    }
+    // No-op: SQLite is the source of truth since Phase 2.
+    // cache.json is only written as a backup on shutdown.
 }
