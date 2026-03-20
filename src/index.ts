@@ -452,8 +452,6 @@ async function main() {
             forceExitTimeout.unref();
         }
         try {
-            console.log("Saving cache backup...");
-            saveCache();
             console.log("Closing database...");
             closeDB();
             console.log("Closing server...");
